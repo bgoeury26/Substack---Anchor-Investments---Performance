@@ -1,4 +1,5 @@
 altair==6.0.0
+anyio==4.13.0
 attrs==26.1.0
 bcrypt==5.0.0
 beautifulsoup4==4.14.3
@@ -12,10 +13,14 @@ curl_cffi==0.15.0
 frozendict==2.4.7
 gitdb==4.0.12
 GitPython==3.1.46
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
 idna==3.11
 Jinja2==3.1.6
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
+libsql-experimental==0.0.55
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
 mdurl==0.1.2
