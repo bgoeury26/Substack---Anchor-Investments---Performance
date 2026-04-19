@@ -393,7 +393,7 @@ tab_admin = tabs[5] if is_authenticated() else None
 # ── Load persistent data ──────────────────────────────────────────────────────
 holdings_df_raw = get_holdings(active_only=True)
 last_updated = get_meta("last_updated")
-inception_date = get_meta("inception_date", "2024-01-15")
+inception_date = get_meta("inception_date", "2026-04-15")
 
 enriched = enrich_holdings(holdings_df_raw) if not holdings_df_raw.empty else pd.DataFrame()
 ts_df = build_portfolio_timeseries(holdings_df_raw, inception_date) if not holdings_df_raw.empty else pd.DataFrame()

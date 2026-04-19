@@ -67,19 +67,19 @@ def seed_database():
         conn.close()
         return
     seed = [
-        ("IWDA.AS", "iShares Core MSCI World ETF",  35000, "ETF",    "USD", "Global",  "2024-01-15", 1, "", None),
-        ("EIMI.AS", "iShares Core MSCI EM IMI ETF",  15000, "ETF",    "USD", "EM",      "2024-01-15", 1, "", None),
-        ("IUSN.AS", "iShares MSCI World Small Cap ETF", 10000, "ETF", "USD", "Global",  "2024-01-15", 1, "", None),
-        ("ASML.AS", "ASML Holding",                  12000, "Equity", "EUR", "Europe",  "2024-01-15", 1, "", None),
-        ("XGIU.AS", "Xtrackers Global Infl Bond ETF",10000, "Bond ETF","EUR","Global",  "2024-01-15", 1, "", None),
-        ("AAPL",    "Apple Inc.",                     8000, "Equity", "USD", "US",      "2024-01-15", 1, "", None),
-        ("BTC-EUR", "Bitcoin",                        5000, "Crypto", "EUR", "Global",  "2024-03-01", 1, "", None),
-        ("CASH",    "EUR Cash / Money Market",        5000, "Cash",   "EUR", "Global",  "2024-01-15", 1, "", None),
+        ("IWDA.AS", "iShares Core MSCI World ETF",  35000, "ETF",    "USD", "Global",  "2026-04-15", 1, "", None),
+        ("EIMI.AS", "iShares Core MSCI EM IMI ETF",  15000, "ETF",    "USD", "EM",      "2026-04-15", 1, "", None),
+        ("IUSN.AS", "iShares MSCI World Small Cap ETF", 10000, "ETF", "USD", "Global",  "2026-04-15", 1, "", None),
+        ("ASML.AS", "ASML Holding",                  12000, "Equity", "EUR", "Europe",  "2026-04-15", 1, "", None),
+        ("XGIU.AS", "Xtrackers Global Infl Bond ETF",10000, "Bond ETF","EUR","Global",  "2026-04-15", 1, "", None),
+        ("AAPL",    "Apple Inc.",                     8000, "Equity", "USD", "US",      "2026-04-15", 1, "", None),
+        ("BTC-EUR", "Bitcoin",                        5000, "Crypto", "EUR", "Global",  "2026-04-15", 1, "", None),
+        ("CASH",    "EUR Cash / Money Market",        5000, "Cash",   "EUR", "Global",  "2026-04-15", 1, "", None),
     ]
     cur.executemany(
         "INSERT OR IGNORE INTO holdings VALUES (?,?,?,?,?,?,?,?,?,?)", seed
     )
-    cur.execute("INSERT OR IGNORE INTO meta(key,value) VALUES ('inception_date','2024-01-15')")
+    cur.execute("INSERT OR IGNORE INTO meta(key,value) VALUES ('inception_date','2026-04-15')")
     conn.commit()
     conn.close()
     print("[storage] Seed data inserted.")
