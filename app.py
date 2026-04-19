@@ -37,89 +37,300 @@ seed_database()
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap');
+/* ── Fonts ─────────────────────────────────────────────── */
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
 
 html, body, [class*="css"] {
-    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-family: 'Satoshi', -apple-system, sans-serif !important;
 }
 
-/* Remove default Streamlit header padding */
-.block-container { padding-top: 1.5rem; }
-
-/* KPI card styles */
-.kpi-card {
-    background: #f9f8f5;
-    border: 1px solid #d4d1ca;
-    border-radius: 8px;
-    padding: 1rem 1.25rem;
-    margin-bottom: 0.5rem;
-}
-.kpi-label {
-    font-size: 0.75rem;
-    color: #7a7974;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 0.2rem;
-}
-.kpi-value {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: #28251d;
-    line-height: 1.2;
-}
-.kpi-value.positive { color: #01696f; }
-.kpi-value.negative { color: #a12c7b; }
-
-/* Section header line */
-.section-header {
-    border-top: 1px solid #d4d1ca;
-    padding-top: 1rem;
-    margin-top: 1.5rem;
-    color: #28251d;
-    font-weight: 600;
+/* ── Page background ────────────────────────────────────── */
+.stApp {
+    background-color: #0f1117 !important;
 }
 
-/* Disclaimer */
-.disclaimer {
-    background: #f3f0ec;
-    border-left: 3px solid #d4d1ca;
-    padding: 0.75rem 1rem;
-    font-size: 0.8rem;
-    color: #7a7974;
-    border-radius: 0 6px 6px 0;
-    margin-top: 1.5rem;
-}
+/* ── Hide Streamlit chrome ───────────────────────────────── */
+#MainMenu, footer, header { visibility: hidden; }
+.stDeployButton { display: none; }
 
-/* Admin badge */
-.admin-badge {
-    background: #01696f;
-    color: white;
-    padding: 2px 10px;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-}
-
-/* Tab styling */
+/* ── Tab bar ─────────────────────────────────────────────── */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 8px;
-    border-bottom: 1px solid #d4d1ca;
+    gap: 0;
+    border-bottom: 1px solid #2a2d35;
+    background: transparent;
+    padding: 0;
+    margin-bottom: 1.5rem;
 }
 .stTabs [data-baseweb="tab"] {
-    font-size: 0.85rem;
+    font-size: 0.8125rem;
     font-weight: 500;
-    padding: 8px 16px;
-    color: #7a7974;
+    letter-spacing: 0.02em;
+    color: #6b7280;
+    padding: 0.625rem 1.25rem;
+    border-bottom: 2px solid transparent;
+    background: transparent !important;
+    border-radius: 0;
+    transition: color 0.15s ease, border-color 0.15s ease;
 }
 .stTabs [aria-selected="true"] {
-    color: #01696f !important;
+    color: #e2e8f0 !important;
     border-bottom: 2px solid #01696f !important;
-    background: none !important;
+    background: transparent !important;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: #cbd5e1 !important;
 }
 
-/* Table */
-.dataframe { font-size: 0.82rem; }
+/* ── KPI metric cards ────────────────────────────────────── */
+[data-testid="metric-container"] {
+    background: #1a1d26;
+    border: 1px solid #2a2d35;
+    border-radius: 0.5rem;
+    padding: 1rem 1.25rem;
+    transition: border-color 0.15s ease;
+}
+[data-testid="metric-container"]:hover {
+    border-color: #3a3d45;
+}
+[data-testid="metric-container"] label {
+    font-size: 0.6875rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    color: #6b7280 !important;
+}
+[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    color: #e2e8f0 !important;
+    font-variant-numeric: tabular-nums lining-nums;
+    line-height: 1.2;
+}
+[data-testid="metric-container"] [data-testid="stMetricDelta"] {
+    font-size: 0.75rem !important;
+    font-weight: 500 !important;
+}
+
+/* ── Section headings ────────────────────────────────────── */
+h1 {
+    font-size: 1.375rem !important;
+    font-weight: 700 !important;
+    color: #e2e8f0 !important;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.25rem !important;
+}
+h2 {
+    font-size: 0.9375rem !important;
+    font-weight: 600 !important;
+    color: #cbd5e1 !important;
+    margin-top: 1.5rem !important;
+    margin-bottom: 0.75rem !important;
+}
+h3 {
+    font-size: 0.8125rem !important;
+    font-weight: 600 !important;
+    color: #94a3b8 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* ── Data tables ─────────────────────────────────────────── */
+[data-testid="stDataFrame"] {
+    border: 1px solid #2a2d35;
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+[data-testid="stDataFrame"] th {
+    background: #1a1d26 !important;
+    color: #6b7280 !important;
+    font-size: 0.6875rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.06em !important;
+    text-transform: uppercase !important;
+    padding: 0.625rem 0.75rem !important;
+    border-bottom: 1px solid #2a2d35 !important;
+}
+[data-testid="stDataFrame"] td {
+    font-size: 0.8125rem !important;
+    color: #cbd5e1 !important;
+    padding: 0.5rem 0.75rem !important;
+    border-bottom: 1px solid #1e2028 !important;
+    font-variant-numeric: tabular-nums lining-nums;
+}
+[data-testid="stDataFrame"] tr:hover td {
+    background: #1e2130 !important;
+}
+
+/* ── Cards / containers ───────────────────────────────────── */
+[data-testid="stExpander"] {
+    background: #1a1d26;
+    border: 1px solid #2a2d35 !important;
+    border-radius: 0.5rem !important;
+    margin-bottom: 0.375rem;
+}
+[data-testid="stExpander"]:hover {
+    border-color: #3a3d45 !important;
+}
+[data-testid="stExpander"] summary {
+    font-size: 0.8125rem !important;
+    font-weight: 500 !important;
+    color: #cbd5e1 !important;
+    padding: 0.625rem 0.875rem !important;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.stButton > button {
+    background: #01696f !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 0.375rem !important;
+    font-size: 0.8125rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em;
+    padding: 0.5rem 1rem !important;
+    transition: background 0.15s ease !important;
+}
+.stButton > button:hover {
+    background: #0c4e54 !important;
+}
+.stButton > button:active {
+    background: #0f3638 !important;
+}
+
+/* ── Form inputs ─────────────────────────────────────────── */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stSelectbox > div > div,
+.stTextArea > div > div > textarea,
+.stDateInput > div > div > input {
+    background: #1a1d26 !important;
+    border: 1px solid #2a2d35 !important;
+    border-radius: 0.375rem !important;
+    color: #e2e8f0 !important;
+    font-size: 0.8125rem !important;
+    transition: border-color 0.15s ease !important;
+}
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus {
+    border-color: #01696f !important;
+    box-shadow: 0 0 0 2px rgba(1,105,111,0.2) !important;
+}
+.stTextInput label, .stNumberInput label,
+.stSelectbox label, .stTextArea label,
+.stDateInput label, .stCheckbox label {
+    font-size: 0.75rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.04em !important;
+    color: #6b7280 !important;
+    text-transform: uppercase !important;
+}
+
+/* ── Success / info / warning / error alerts ─────────────── */
+[data-testid="stAlert"] {
+    border-radius: 0.5rem !important;
+    font-size: 0.8125rem !important;
+    border-left-width: 3px !important;
+}
+
+/* ── Sidebar (admin panel) ───────────────────────────────── */
+[data-testid="stSidebar"] {
+    background: #13151e !important;
+    border-right: 1px solid #2a2d35 !important;
+}
+
+/* ── Portfolio value chart ───────────────────────────────── */
+[data-testid="stPlotlyChart"] {
+    border: 1px solid #2a2d35;
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+/* ── Disclaimer banner ───────────────────────────────────── */
+.disclaimer {
+    background: #1a1d26;
+    border: 1px solid #2a2d35;
+    border-left: 3px solid #6b7280;
+    border-radius: 0.375rem;
+    padding: 0.625rem 1rem;
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-top: 2rem;
+    line-height: 1.5;
+}
+
+/* ── Info text / captions ────────────────────────────────── */
+.stCaption, [data-testid="stCaptionContainer"] {
+    font-size: 0.75rem !important;
+    color: #6b7280 !important;
+}
+
+/* ── Dividers ────────────────────────────────────────────── */
+hr {
+    border-color: #2a2d35 !important;
+    margin: 1.5rem 0 !important;
+}
+
+/* ── Logo / brand header ─────────────────────────────────── */
+.brand-header {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 1.25rem 0 0.25rem;
+}
+.brand-name {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    letter-spacing: -0.02em;
+}
+.brand-tagline {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-top: 0.125rem;
+}
+.brand-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #01696f;
+    display: inline-block;
+    margin-right: 2px;
+    box-shadow: 0 0 6px rgba(1,105,111,0.6);
+}
+
+/* ── Last updated pill ───────────────────────────────────── */
+.last-updated {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    background: #1a1d26;
+    border: 1px solid #2a2d35;
+    border-radius: 9999px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.6875rem;
+    color: #6b7280;
+    margin-bottom: 1rem;
+}
+.last-updated::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #01696f;
+}
+
+/* ── Number coloring ─────────────────────────────────────── */
+.positive { color: #4ade80 !important; font-weight: 600; }
+.negative { color: #f87171 !important; font-weight: 600; }
+.neutral  { color: #94a3b8 !important; }
+
+/* ── Plotly modebar ──────────────────────────────────────── */
+.modebar-container { background: transparent !important; }
+.modebar-btn path { fill: #6b7280 !important; }
+.modebar-btn:hover path { fill: #e2e8f0 !important; }
+
 </style>
 """, unsafe_allow_html=True)
 

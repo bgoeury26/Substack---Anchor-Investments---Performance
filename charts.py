@@ -2,7 +2,7 @@
 charts.py — Plotly chart builders for the portfolio dashboard.
 
 All functions return go.Figure objects ready for st.plotly_chart().
-Color palette aligns with a minimal investment research brand.
+Dark theme aligned with a minimal investment research brand.
 """
 
 import plotly.graph_objects as go
@@ -10,23 +10,26 @@ import plotly.express as px
 import pandas as pd
 import numpy as np
 
-# ── Brand palette ─────────────────────────────────────────────────────────────
-TEAL      = "#01696f"
-TEAL_MUTED = "#4f98a3"
-GOLD       = "#d19900"
-WARM_RED   = "#a12c7b"
-BEIGE_BG   = "#f7f6f2"
-SURFACE    = "#f9f8f5"
-TEXT_MAIN  = "#28251d"
-TEXT_MUTED = "#7a7974"
-BORDER     = "#d4d1ca"
+# ── Brand palette ──────────────────────────────────────────────────────────────
+TEAL        = "#01696f"
+TEAL_MUTED  = "#4f98a3"
+GOLD        = "#d19900"
+WARM_RED    = "#a12c7b"
+
+# ── Dark theme surfaces ────────────────────────────────────────────────────────
+CHART_BG    = "#0f1117"
+CHART_PAPER = "#0f1117"
+CHART_GRID  = "#1e2130"
+CHART_LINE  = "#2a2d35"
+CHART_TEXT  = "#94a3b8"
+CHART_TEXT_DIM = "#4b5563"
 
 ASSET_CLASS_COLORS = {
     "Equity":       "#01696f",
     "ETF":          "#4f98a3",
     "Bond ETF":     "#d19900",
     "Crypto":       "#da7101",
-    "Cash":         "#bab9b4",
+    "Cash":         "#6b7280",
     "Real Estate":  "#a12c7b",
     "Commodity":    "#006494",
 }
@@ -34,61 +37,113 @@ ASSET_CLASS_COLORS = {
 
 def _base_layout(fig: go.Figure, title: str = "", height: int = 420) -> go.Figure:
     fig.update_layout(
-        title=dict(text=title, font=dict(size=14, color=TEXT_MAIN), x=0, xanchor="left"),
-        paper_bgcolor=SURFACE,
-        plot_bgcolor=SURFACE,
-        font=dict(family="'Inter', 'Helvetica Neue', sans-serif", color=TEXT_MAIN, size=12),
-        margin=dict(l=12, r=12, t=40 if title else 16, b=12),
+        title=dict(
+            text=title,
+            font=dict(size=13, color=CHART_TEXT, family="Satoshi, sans-serif"),
+            x=0, xanchor="left",
+        ),
+        paper_bgcolor=CHART_PAPER,
+        plot_bgcolor=CHART_BG,
+        font=dict(family="Satoshi, sans-serif", color=CHART_TEXT, size=12),
+        margin=dict(l=12, r=12, t=44 if title else 16, b=12),
         height=height,
         legend=dict(
             bgcolor="rgba(0,0,0,0)",
             borderwidth=0,
-            font=dict(size=11, color=TEXT_MUTED),
+            font=dict(size=11, color=CHART_TEXT),
         ),
-        xaxis=dict(showgrid=False, zeroline=False, color=TEXT_MUTED, tickfont=dict(size=11)),
-        yaxis=dict(gridcolor=BORDER, zeroline=False, color=TEXT_MUTED, tickfont=dict(size=11)),
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+        ),
+        yaxis=dict(
+            gridcolor=CHART_GRID,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+        ),
     )
     return fig
 
 
-# ── Portfolio value line chart ────────────────────────────────────────────────
+# ── Portfolio value line chart ─────────────────────────────────────────────────
 
 def portfolio_line_chart(ts_df: pd.DataFrame, base_capital: float = 100_000) -> go.Figure:
-    """Dual-axis chart: portfolio value (EUR) + cumulative return (%)."""
+    """Area line chart: portfolio value (EUR) with time-range selector."""
     if ts_df.empty:
         fig = go.Figure()
-        fig.add_annotation(text="No data available", showarrow=False,
-                           font=dict(size=14, color=TEXT_MUTED), xref="paper", yref="paper",
-                           x=0.5, y=0.5)
+        fig.add_annotation(
+            text="No data available", showarrow=False,
+            font=dict(size=14, color=CHART_TEXT),
+            xref="paper", yref="paper", x=0.5, y=0.5,
+        )
         return _base_layout(fig, "Portfolio Value Over Time")
 
     fig = go.Figure()
 
-    # Value line
     fig.add_trace(go.Scatter(
         x=ts_df["date"], y=ts_df["portfolio_value"],
         mode="lines",
         name="Portfolio (EUR)",
         line=dict(color=TEAL, width=2.5),
         fill="tozeroy",
-        fillcolor=f"rgba(1,105,111,0.08)",
+        fillcolor="rgba(1,105,111,0.10)",
         hovertemplate="<b>%{x|%d %b %Y}</b><br>€%{y:,.0f}<extra></extra>",
     ))
 
-    # Base capital reference line
     fig.add_hline(
         y=base_capital,
         line_dash="dot",
-        line_color=TEXT_MUTED,
+        line_color=CHART_TEXT_DIM,
         line_width=1,
         annotation_text="Base €100k",
         annotation_font_size=10,
-        annotation_font_color=TEXT_MUTED,
+        annotation_font_color=CHART_TEXT_DIM,
     )
 
     fig = _base_layout(fig, "Portfolio Value (EUR)", height=380)
-    fig.update_yaxes(tickprefix="€", tickformat=",.0f")
-    fig.update_xaxes(showgrid=False)
+
+    fig.update_layout(
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+            type="date",
+            rangeslider=dict(visible=False),
+            rangeselector=dict(
+                bgcolor="#1a1d26",
+                activecolor=TEAL,
+                bordercolor=CHART_LINE,
+                borderwidth=1,
+                font=dict(color=CHART_TEXT, size=11),
+                buttons=[
+                    dict(count=7,  label="1W",  step="day",   stepmode="backward"),
+                    dict(count=1,  label="1M",  step="month", stepmode="backward"),
+                    dict(count=1,  label="MTD", step="month", stepmode="todate"),
+                    dict(count=3,  label="3M",  step="month", stepmode="backward"),
+                    dict(count=6,  label="6M",  step="month", stepmode="backward"),
+                    dict(count=1,  label="YTD", step="year",  stepmode="todate"),
+                    dict(count=1,  label="1Y",  step="year",  stepmode="backward"),
+                    dict(step="all", label="All"),
+                ],
+            ),
+        ),
+        yaxis=dict(
+            gridcolor=CHART_GRID,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+            tickprefix="€",
+            tickformat=",.0f",
+        ),
+    )
     return fig
 
 
@@ -96,8 +151,6 @@ def return_line_chart(ts_df: pd.DataFrame) -> go.Figure:
     """Cumulative return % over time."""
     if ts_df.empty:
         return _base_layout(go.Figure(), "Cumulative Return (%)")
-
-    positive = ts_df["cumulative_return_pct"] >= 0
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -107,10 +160,45 @@ def return_line_chart(ts_df: pd.DataFrame) -> go.Figure:
         line=dict(color=TEAL, width=2),
         hovertemplate="<b>%{x|%d %b %Y}</b><br>%{y:+.2f}%<extra></extra>",
     ))
-    fig.add_hline(y=0, line_dash="solid", line_color=BORDER, line_width=1)
+    fig.add_hline(y=0, line_dash="solid", line_color=CHART_LINE, line_width=1)
 
     fig = _base_layout(fig, "Cumulative Return (%)", height=280)
-    fig.update_yaxes(ticksuffix="%")
+    fig.update_layout(
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+            type="date",
+            rangeslider=dict(visible=False),
+            rangeselector=dict(
+                bgcolor="#1a1d26",
+                activecolor=TEAL,
+                bordercolor=CHART_LINE,
+                borderwidth=1,
+                font=dict(color=CHART_TEXT, size=11),
+                buttons=[
+                    dict(count=7,  label="1W",  step="day",   stepmode="backward"),
+                    dict(count=1,  label="1M",  step="month", stepmode="backward"),
+                    dict(count=1,  label="MTD", step="month", stepmode="todate"),
+                    dict(count=3,  label="3M",  step="month", stepmode="backward"),
+                    dict(count=6,  label="6M",  step="month", stepmode="backward"),
+                    dict(count=1,  label="YTD", step="year",  stepmode="todate"),
+                    dict(count=1,  label="1Y",  step="year",  stepmode="backward"),
+                    dict(step="all", label="All"),
+                ],
+            ),
+        ),
+        yaxis=dict(
+            gridcolor=CHART_GRID,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+            ticksuffix="%",
+        ),
+    )
     return fig
 
 
@@ -130,15 +218,50 @@ def drawdown_chart(ts_df: pd.DataFrame) -> go.Figure:
         name="Drawdown",
         line=dict(color=WARM_RED, width=1.5),
         fill="tozeroy",
-        fillcolor=f"rgba(161,44,123,0.10)",
+        fillcolor="rgba(161,44,123,0.12)",
         hovertemplate="<b>%{x|%d %b %Y}</b><br>%{y:.2f}%<extra></extra>",
     ))
     fig = _base_layout(fig, "Drawdown from Peak (%)", height=220)
-    fig.update_yaxes(ticksuffix="%")
+    fig.update_layout(
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+            type="date",
+            rangeslider=dict(visible=False),
+            rangeselector=dict(
+                bgcolor="#1a1d26",
+                activecolor=TEAL,
+                bordercolor=CHART_LINE,
+                borderwidth=1,
+                font=dict(color=CHART_TEXT, size=11),
+                buttons=[
+                    dict(count=7,  label="1W",  step="day",   stepmode="backward"),
+                    dict(count=1,  label="1M",  step="month", stepmode="backward"),
+                    dict(count=1,  label="MTD", step="month", stepmode="todate"),
+                    dict(count=3,  label="3M",  step="month", stepmode="backward"),
+                    dict(count=6,  label="6M",  step="month", stepmode="backward"),
+                    dict(count=1,  label="YTD", step="year",  stepmode="todate"),
+                    dict(count=1,  label="1Y",  step="year",  stepmode="backward"),
+                    dict(step="all", label="All"),
+                ],
+            ),
+        ),
+        yaxis=dict(
+            gridcolor=CHART_GRID,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+            ticksuffix="%",
+        ),
+    )
     return fig
 
 
-# ── Allocation charts ─────────────────────────────────────────────────────────
+# ── Allocation charts ──────────────────────────────────────────────────────────
 
 def allocation_pie(holdings_df: pd.DataFrame) -> go.Figure:
     """Donut chart of EUR allocation by ticker."""
@@ -153,12 +276,15 @@ def allocation_pie(holdings_df: pd.DataFrame) -> go.Figure:
         values=df["eur_allocation"],
         hole=0.52,
         texttemplate="%{label}<br>%{percent}",
-        textfont=dict(size=11),
-        marker=dict(colors=colors, line=dict(color=SURFACE, width=2)),
+        textfont=dict(size=11, color="#e2e8f0"),
+        marker=dict(colors=colors, line=dict(color=CHART_BG, width=2)),
         hovertemplate="<b>%{label}</b><br>€%{value:,.0f}<br>%{percent}<extra></extra>",
     ))
     fig = _base_layout(fig, "Allocation by Ticker", height=380)
-    fig.update_layout(showlegend=False, margin=dict(l=0, r=0, t=40, b=0))
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(l=0, r=0, t=40, b=0),
+    )
     return fig
 
 
@@ -182,13 +308,14 @@ def allocation_treemap(holdings_df: pd.DataFrame) -> go.Figure:
         texttemplate="<b>%{label}</b><br>€%{value:,.0f}",
         hovertemplate="<b>%{label}</b><br>€%{value:,.0f}<extra></extra>",
         textfont_size=12,
+        textfont_color="#e2e8f0",
     )
     fig = _base_layout(fig, "Allocation Treemap", height=400)
     fig.update_layout(margin=dict(l=0, r=0, t=40, b=0))
     return fig
 
 
-# ── Contribution bar chart ────────────────────────────────────────────────────
+# ── Contribution bar chart ─────────────────────────────────────────────────────
 
 def contribution_bar(contrib_df: pd.DataFrame) -> go.Figure:
     """Horizontal bar chart of contribution to total PnL (EUR)."""
@@ -205,22 +332,40 @@ def contribution_bar(contrib_df: pd.DataFrame) -> go.Figure:
         marker_color=colors,
         text=df["contrib_eur"].apply(lambda x: f"€{x:+,.0f}"),
         textposition="outside",
+        textfont=dict(color=CHART_TEXT, size=11),
         hovertemplate="<b>%{y}</b><br>%{x:+,.0f} EUR<extra></extra>",
     ))
-    fig.add_vline(x=0, line_color=BORDER, line_width=1)
-    fig = _base_layout(fig, "Contribution to PnL (EUR, since inception)", height=max(280, len(df) * 36))
-    fig.update_xaxes(tickprefix="€", tickformat=",.0f")
+    fig.add_vline(x=0, line_color=CHART_LINE, line_width=1)
+    fig = _base_layout(
+        fig,
+        "Contribution to PnL (EUR, since inception)",
+        height=max(280, len(df) * 36),
+    )
+    fig.update_layout(
+        xaxis=dict(
+            showgrid=True,
+            gridcolor=CHART_GRID,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+            tickprefix="€",
+            tickformat=",.0f",
+        ),
+    )
     return fig
 
 
-# ── Asset class breakdown bar ─────────────────────────────────────────────────
+# ── Asset class breakdown bar ──────────────────────────────────────────────────
 
 def asset_class_bar(holdings_df: pd.DataFrame) -> go.Figure:
     if holdings_df.empty:
         return _base_layout(go.Figure(), "By Asset Class")
 
-    df = (holdings_df.groupby("asset_class")["eur_allocation"]
-          .sum().reset_index().sort_values("eur_allocation", ascending=False))
+    df = (
+        holdings_df.groupby("asset_class")["eur_allocation"]
+        .sum().reset_index().sort_values("eur_allocation", ascending=False)
+    )
     colors = [ASSET_CLASS_COLORS.get(ac, TEAL_MUTED) for ac in df["asset_class"]]
 
     fig = go.Figure(go.Bar(
@@ -229,8 +374,19 @@ def asset_class_bar(holdings_df: pd.DataFrame) -> go.Figure:
         marker_color=colors,
         text=df["eur_allocation"].apply(lambda v: f"€{v:,.0f}"),
         textposition="outside",
+        textfont=dict(color=CHART_TEXT, size=11),
         hovertemplate="<b>%{x}</b><br>€%{y:,.0f}<extra></extra>",
     ))
     fig = _base_layout(fig, "Allocation by Asset Class (EUR)", height=300)
-    fig.update_yaxes(tickprefix="€", tickformat=",.0f")
+    fig.update_layout(
+        yaxis=dict(
+            gridcolor=CHART_GRID,
+            zeroline=False,
+            color=CHART_TEXT,
+            tickfont=dict(size=11, color=CHART_TEXT),
+            linecolor=CHART_LINE,
+            tickprefix="€",
+            tickformat=",.0f",
+        ),
+    )
     return fig
