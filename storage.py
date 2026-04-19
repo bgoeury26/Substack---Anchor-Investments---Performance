@@ -269,3 +269,50 @@ def get_rebalance_items(event_id: int) -> pd.DataFrame:
     if not row or not row[0]:
         return pd.DataFrame()
     return pd.DataFrame(json.loads(row[0]))
+
+
+# ── Position Updates ─────────────────────────────────────────────────────────
+
+def init_position_updates_table():
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS position_updates (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker               TEXT NOT NULL,
+            update_date          TEXT NOT NULL,
+            previous_allocation  REAL NOT NULL,
+            new_allocation       REAL NOT NULL,
+            direction            TEXT NOT NULL,
+            note                 TEXT DEFAULT ''
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def log_position_update(ticker: str, previous_allocation: float,
+                         new_allocation: float, note: str = "") -> None:
+    if new_allocation > previous_allocation:
+        direction = "Increased"
+    elif new_allocation < previous_allocation:
+        direction = "Reduced"
+    else:
+        direction = "Unchanged"
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO position_updates
+            (ticker, update_date, previous_allocation, new_allocation, direction, note)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (ticker.upper(), date.today().isoformat(),
+          previous_allocation, new_allocation, direction, note))
+    conn.commit()
+    conn.close()
+
+
+def get_position_updates() -> pd.DataFrame:
+    conn = get_conn()
+    df = pd.read_sql_query(
+        "SELECT * FROM position_updates ORDER BY update_date DESC, id DESC", conn
+    )
+    conn.close()
+    return df

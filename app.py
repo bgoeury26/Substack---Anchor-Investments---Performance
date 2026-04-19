@@ -21,7 +21,9 @@ from config import (
     PORTFOLIO_NAME, PORTFOLIO_DESCRIPTION, SUBSTACK_URL,
     BASE_CAPITAL, DISCLAIMER, CURRENCY_DISPLAY
 )
-from storage import init_db, seed_database, get_holdings, get_meta, create_rebalance_snapshot
+from storage import (init_db, seed_database, get_holdings, get_meta,
+                     create_rebalance_snapshot, init_position_updates_table,
+                     log_position_update, get_position_updates)
 from data_loader import get_spot_price
 from portfolio_engine import enrich_holdings, build_portfolio_timeseries, compute_analytics, compute_contributions
 from charts import (
@@ -33,6 +35,7 @@ from auth import require_auth, is_authenticated, logout
 # ── Initialise persistent storage on every startup ───────────────────────────
 init_db()
 seed_database()
+init_position_updates_table()
 
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -381,12 +384,12 @@ st.markdown("---")
 # TAB LAYOUT
 # ═════════════════════════════════════════════════════════════════════════════
 
-tab_labels = ["📈 Overview", "🥧 Allocation", "📉 Performance", "📋 Holdings", "ℹ️ About"]
+tab_labels = ["📈 Overview", "🥧 Allocation", "📉 Performance", "📋 Holdings", "🔄 Changes", "ℹ️ About"]
 if is_authenticated():
     tab_labels.append("⚙️ Admin")
 
 tabs = st.tabs(tab_labels)
-tab_overview, tab_alloc, tab_perf, tab_holdings, tab_about = tabs[:5]
+tab_overview, tab_alloc, tab_perf, tab_holdings, tab_changes, tab_about = tabs[:6]
 tab_admin = tabs[5] if is_authenticated() else None
 
 
@@ -710,3 +713,100 @@ if tab_admin is not None:
                             items[["ticker", "name", "eur_allocation", "asset_class", "currency", "region"]],
                             hide_index=True, width="stretch"
                         )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB — PORTFOLIO CHANGES (public)
+# ═════════════════════════════════════════════════════════════════════════════
+
+with tab_changes:
+    st.markdown("### 🔄 Portfolio Changes")
+    st.caption("A log of all position size adjustments since inception.")
+    updates_df = get_position_updates()
+    if updates_df.empty:
+        st.info("No position updates logged yet.")
+    else:
+        total_alloc = holdings_df_raw["eur_allocation"].sum()
+        for _, row in updates_df.iterrows():
+            delta = row["new_allocation"] - row["previous_allocation"]
+            delta_pct_prev = (row["previous_allocation"] / total_alloc * 100) if total_alloc else 0
+            delta_pct_new  = (row["new_allocation"] / total_alloc * 100) if total_alloc else 0
+            arrow = "▲" if row["direction"] == "Increased" else ("▼" if row["direction"] == "Reduced" else "→")
+            color = "#4ade80" if row["direction"] == "Increased" else ("#f87171" if row["direction"] == "Reduced" else "#94a3b8")
+            st.markdown(f"""
+            <div style="background:#1a1d26;border:1px solid #2a2d35;border-radius:0.5rem;
+                        padding:0.875rem 1.125rem;margin-bottom:0.5rem;display:flex;
+                        align-items:center;gap:1.5rem;flex-wrap:wrap;">
+                <div style="min-width:80px;">
+                    <div style="font-size:0.6875rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Date</div>
+                    <div style="font-size:0.875rem;color:#cbd5e1;font-weight:500;">{row['update_date']}</div>
+                </div>
+                <div style="min-width:80px;">
+                    <div style="font-size:0.6875rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Ticker</div>
+                    <div style="font-size:0.875rem;color:#e2e8f0;font-weight:700;">{row['ticker']}</div>
+                </div>
+                <div style="min-width:200px;">
+                    <div style="font-size:0.6875rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Allocation</div>
+                    <div style="font-size:0.875rem;color:#cbd5e1;">
+                        €{row['previous_allocation']:,.0f}
+                        <span style="color:{color};font-weight:600;margin:0 0.25rem;">{arrow}</span>
+                        €{row['new_allocation']:,.0f}
+                    </div>
+                </div>
+                <div style="min-width:180px;">
+                    <div style="font-size:0.6875rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Weight</div>
+                    <div style="font-size:0.875rem;color:#cbd5e1;">
+                        {delta_pct_prev:.1f}%
+                        <span style="color:{color};font-weight:600;margin:0 0.25rem;">{arrow}</span>
+                        {delta_pct_new:.1f}%
+                    </div>
+                </div>
+                <div style="min-width:100px;">
+                    <div style="font-size:0.6875rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Change</div>
+                    <div style="font-size:0.875rem;font-weight:600;color:{color};">{arrow} €{abs(delta):,.0f}</div>
+                </div>
+                <div style="flex:1;min-width:150px;">
+                    <div style="font-size:0.6875rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">Note</div>
+                    <div style="font-size:0.8125rem;color:#94a3b8;">{row['note'] if row['note'] else '—'}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ADMIN — Log Position Update form (injected at bottom; rendered inside tab_admin above)
+# ═════════════════════════════════════════════════════════════════════════════
+
+if tab_admin is not None:
+    with tab_admin:
+        st.markdown("#### 🔄 Log Position Update")
+        st.caption("Record a change to an existing holding's allocation size.")
+        active_holdings_pu = get_holdings(active_only=True)
+        if not active_holdings_pu.empty:
+            with st.form("position_update_form"):
+                pu_col1, pu_col2 = st.columns(2)
+                with pu_col1:
+                    pu_ticker = st.selectbox("Ticker *", options=active_holdings_pu["ticker"].tolist())
+                    current_alloc = float(active_holdings_pu.loc[active_holdings_pu["ticker"] == pu_ticker, "eur_allocation"].values[0]) if pu_ticker else 0.0
+                    st.caption(f"Current allocation: €{current_alloc:,.0f}")
+                    pu_new_alloc = st.number_input("New EUR Allocation *", min_value=0.0, max_value=float(BASE_CAPITAL), value=current_alloc, step=500.0)
+                with pu_col2:
+                    pu_note = st.text_area("Note (optional)", placeholder="e.g. Increased after Q1 earnings beat", height=100)
+                pu_submitted = st.form_submit_button("📝 Log Update", type="primary")
+            if pu_submitted:
+                if pu_new_alloc == current_alloc:
+                    st.warning("New allocation is the same as current — no update logged.")
+                else:
+                    log_position_update(ticker=pu_ticker, previous_allocation=current_alloc, new_allocation=pu_new_alloc, note=pu_note)
+                    save_holding(
+                        ticker=pu_ticker,
+                        name=active_holdings_pu.loc[active_holdings_pu["ticker"] == pu_ticker, "name"].values[0],
+                        eur_allocation=pu_new_alloc,
+                        asset_class=active_holdings_pu.loc[active_holdings_pu["ticker"] == pu_ticker, "asset_class"].values[0],
+                        currency=active_holdings_pu.loc[active_holdings_pu["ticker"] == pu_ticker, "currency"].values[0],
+                        region=active_holdings_pu.loc[active_holdings_pu["ticker"] == pu_ticker, "region"].values[0],
+                        effective_date=active_holdings_pu.loc[active_holdings_pu["ticker"] == pu_ticker, "effective_date"].values[0],
+                        notes=active_holdings_pu.loc[active_holdings_pu["ticker"] == pu_ticker, "notes"].values[0],
+                    )
+                    st.success(f"✅ {pu_ticker} updated: €{current_alloc:,.0f} → €{pu_new_alloc:,.0f}")
+                    st.rerun()
