@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Secrets — NEVER commit
+.env
+.streamlit/secrets.toml
+
+# SQLite database
+# Keep the dev seed if you want, otherwise exclude:
+# data/portfolio.db
+
+# Streamlit cache
+.streamlit/
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Logs
+*.log
