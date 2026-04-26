@@ -543,7 +543,6 @@ with tab_about:
     st.markdown(f"""
 ### About This Portfolio
 
-{PORTFOLIO_DESCRIPTION}
 
 This is a **€{BASE_CAPITAL:,.0f} model portfolio** conceived to reflect the investment insights we share through our Substack publication.
 Allocations are actively managed and updated to mirror our published views on markets, sectors, and individual securities.
