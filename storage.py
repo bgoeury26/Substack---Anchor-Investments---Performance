@@ -174,3 +174,36 @@ def set_cash(amount: float):
         conn.execute("INSERT INTO cash (amount) VALUES (?)", (amount,))
     conn.commit()
     conn.close()
+
+# ── Meta / Rebalance / Legacy aliases ────────────────────────────────────────
+
+def get_meta():
+    """Return portfolio-level metadata dict."""
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM portfolio_meta LIMIT 1").fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return {}
+
+def create_rebalance_snapshot(holdings: list):
+    """Store a rebalance snapshot (no-op stub if table missing)."""
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rebalance_snapshots (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot    TEXT NOT NULL,
+            created_at  TEXT NOT NULL DEFAULT (date('now'))
+        )
+    """)
+    import json
+    conn.execute(
+        "INSERT INTO rebalance_snapshots (snapshot) VALUES (?)",
+        (json.dumps(holdings),)
+    )
+    conn.commit()
+    conn.close()
+
+def log_position_update(ticker: str, shares: float, price: float, updated_date: str = None):
+    """Alias for add_position_update for backward compatibility."""
+    add_position_update(ticker, shares, price, updated_date)
