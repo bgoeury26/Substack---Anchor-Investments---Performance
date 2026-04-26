@@ -12,7 +12,7 @@ load_dotenv()
 PORTFOLIO_NAME = os.getenv("PORTFOLIO_NAME", "Model Portfolio")
 PORTFOLIO_DESCRIPTION = os.getenv(
     "PORTFOLIO_DESCRIPTION",
-    "A model portfolio for research and educational purposes, "
+    "A €100,000 model portfolio conceived to reflect the investment insights "
     "published as a companion to the Substack newsletter.",
 )
 SUBSTACK_URL = os.getenv("SUBSTACK_URL", "https://yoursubstack.substack.com")

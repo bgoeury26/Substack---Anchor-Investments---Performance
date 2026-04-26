@@ -545,8 +545,8 @@ with tab_about:
 
 {PORTFOLIO_DESCRIPTION}
 
-This is a **fictive model portfolio** built on a permanent base of **€{BASE_CAPITAL:,.0f}**.
-It is not connected to any broker and does not represent real money.
+This is a **€{BASE_CAPITAL:,.0f} model portfolio** conceived to reflect the investment insights we share through our Substack publication.
+Allocations are actively managed and updated to mirror our published views on markets, sectors, and individual securities.
 The portfolio is manually maintained as a companion resource to
 [the Substack publication]({SUBSTACK_URL}).
 
