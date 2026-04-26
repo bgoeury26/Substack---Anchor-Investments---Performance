@@ -1,7 +1,6 @@
 """
 storage.py — persistence layer using Turso HTTP API (no libsql_experimental).
-Uses httpx to call Turso's REST endpoint directly. Falls back to local SQLite
-for development if TURSO_URL / TURSO_TOKEN are not set.
+Uses httpx to call Turso REST endpoint. Falls back to local SQLite if no Turso creds.
 """
 
 import os
@@ -9,7 +8,6 @@ import json
 import sqlite3
 import httpx
 from datetime import datetime, date
-from typing import Optional
 import pandas as pd
 from dotenv import load_dotenv
 
@@ -19,31 +17,51 @@ TURSO_URL   = os.getenv("TURSO_URL", "")
 TURSO_TOKEN = os.getenv("TURSO_TOKEN", "")
 DB_PATH     = os.getenv("DB_PATH", "data/portfolio.db")
 
-# Normalise Turso URL: the native driver uses libsql:// or libsql+wss://
-# but httpx needs https://
+# Convert libsql:// or libsql+wss:// → https:// for the HTTP API
 _TURSO_HTTP_URL = (TURSO_URL
     .replace("libsql+wss://", "https://")
-    .replace("libsql://", "https://"))
+    .replace("libsql://",     "https://"))
 _USE_TURSO = bool(_TURSO_HTTP_URL and TURSO_TOKEN)
 
 
 # ── Turso HTTP helpers ────────────────────────────────────────────────────────
 
+def _cast(cell: dict):
+    """Cast a Turso cell {type, value} to a Python native type."""
+    t = cell.get("type", "text")
+    v = cell.get("value")
+    if v is None:
+        return None
+    if t == "integer":
+        return int(v)
+    if t == "float":
+        return float(v)
+    # text / blob — but COUNT(*) comes back as type "integer" from Turso;
+    # guard against the API returning it as a string anyway
+    try:
+        # if it looks like a whole number, cast it
+        if isinstance(v, str) and v.lstrip("-").isdigit():
+            return int(v)
+        return v
+    except Exception:
+        return v
+
+
 def _turso_execute(sql: str, params: list = None):
-    """Execute a single SQL statement against Turso via HTTP and return rows."""
+    """Execute one SQL statement on Turso; returns (cols, rows)."""
     params = params or []
     typed = []
     for p in params:
         if p is None:
-            typed.append({"type": "null", "value": None})
+            typed.append({"type": "null",    "value": None})
         elif isinstance(p, bool):
             typed.append({"type": "integer", "value": int(p)})
         elif isinstance(p, int):
             typed.append({"type": "integer", "value": p})
         elif isinstance(p, float):
-            typed.append({"type": "float", "value": p})
+            typed.append({"type": "float",   "value": p})
         else:
-            typed.append({"type": "text", "value": str(p)})
+            typed.append({"type": "text",    "value": str(p)})
 
     payload = {
         "requests": [
@@ -53,37 +71,32 @@ def _turso_execute(sql: str, params: list = None):
     }
     headers = {
         "Authorization": f"Bearer {TURSO_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type":  "application/json",
     }
-    url = _TURSO_HTTP_URL.rstrip("/") + "/v2/pipeline"
+    url  = _TURSO_HTTP_URL.rstrip("/") + "/v2/pipeline"
     resp = httpx.post(url, json=payload, headers=headers, timeout=15)
     resp.raise_for_status()
-    data = resp.json()
+    data   = resp.json()
     result = data["results"][0]
     if result["type"] == "error":
         raise RuntimeError(f"Turso error: {result['error']}")
-    rs = result.get("response", {}).get("result", {})
+    rs   = result.get("response", {}).get("result", {})
     cols = [c["name"] for c in rs.get("cols", [])]
-    rows = []
-    for row in rs.get("rows", []):
-        rows.append(tuple(cell.get("value") for cell in row))
+    rows = [tuple(_cast(cell) for cell in row) for row in rs.get("rows", [])]
     return cols, rows
 
 
 def _turso_executescript(sql_script: str):
-    """Execute multiple semicolon-separated statements on Turso."""
+    """Run multiple semicolon-separated statements on Turso."""
     statements = [s.strip() for s in sql_script.split(";") if s.strip()]
-    requests = []
-    for stmt in statements:
-        requests.append({"type": "execute", "stmt": {"sql": stmt, "args": []}})
+    requests   = [{"type": "execute", "stmt": {"sql": s, "args": []}} for s in statements]
     requests.append({"type": "close"})
-    payload = {"requests": requests}
     headers = {
         "Authorization": f"Bearer {TURSO_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type":  "application/json",
     }
-    url = _TURSO_HTTP_URL.rstrip("/") + "/v2/pipeline"
-    resp = httpx.post(url, json=payload, headers=headers, timeout=15)
+    url  = _TURSO_HTTP_URL.rstrip("/") + "/v2/pipeline"
+    resp = httpx.post(url, json={"requests": requests}, headers=headers, timeout=15)
     resp.raise_for_status()
 
 
@@ -94,30 +107,27 @@ def _local_conn():
     return sqlite3.connect(DB_PATH)
 
 
-# ── Unified execute ───────────────────────────────────────────────────────────
+# ── Unified helpers ───────────────────────────────────────────────────────────
 
 def _query(sql: str, params: tuple = ()) -> tuple:
-    """Returns (cols, rows). Works for both Turso and local SQLite."""
     if _USE_TURSO:
         return _turso_execute(sql, list(params))
-    else:
-        conn = _local_conn()
-        cur = conn.execute(sql, params)
-        cols = [d[0] for d in (cur.description or [])]
-        rows = cur.fetchall()
-        conn.close()
-        return cols, rows
+    conn = _local_conn()
+    cur  = conn.execute(sql, params)
+    cols = [d[0] for d in (cur.description or [])]
+    rows = cur.fetchall()
+    conn.close()
+    return cols, rows
 
 
 def _exec(sql: str, params: tuple = ()):
-    """Execute a write statement (no return value needed)."""
     if _USE_TURSO:
         _turso_execute(sql, list(params))
-    else:
-        conn = _local_conn()
-        conn.execute(sql, params)
-        conn.commit()
-        conn.close()
+        return
+    conn = _local_conn()
+    conn.execute(sql, params)
+    conn.commit()
+    conn.close()
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -137,23 +147,23 @@ def init_db():
             entry_price_eur REAL DEFAULT NULL
         );
         CREATE TABLE IF NOT EXISTS rebalances (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_date      TEXT NOT NULL,
-            description     TEXT DEFAULT '',
-            snapshot_json   TEXT DEFAULT '{}'
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_date    TEXT NOT NULL,
+            description   TEXT DEFAULT '',
+            snapshot_json TEXT DEFAULT '{}'
         );
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
         CREATE TABLE IF NOT EXISTS position_updates (
-            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker               TEXT NOT NULL,
-            update_date          TEXT NOT NULL,
-            previous_allocation  REAL NOT NULL,
-            new_allocation       REAL NOT NULL,
-            direction            TEXT NOT NULL,
-            note                 TEXT DEFAULT ''
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker              TEXT NOT NULL,
+            update_date         TEXT NOT NULL,
+            previous_allocation REAL NOT NULL,
+            new_allocation      REAL NOT NULL,
+            direction           TEXT NOT NULL,
+            note                TEXT DEFAULT ''
         )
     """
     if _USE_TURSO:
@@ -167,7 +177,7 @@ def init_db():
 
 def seed_database():
     _, rows = _query("SELECT COUNT(*) FROM holdings")
-    count = rows[0][0] if rows else 0
+    count = int(rows[0][0]) if rows and rows[0][0] is not None else 0
     if count > 0:
         print("[storage] Database already populated — skipping seed.")
         return
@@ -183,7 +193,7 @@ def seed_database():
     ]
     for row in seed:
         _exec("INSERT OR IGNORE INTO holdings VALUES (?,?,?,?,?,?,?,?,?,?)", row)
-    _exec("INSERT OR IGNORE INTO meta(key,value) VALUES ('inception_date','2026-04-15')")
+    _exec("INSERT OR IGNORE INTO meta(key,value) VALUES (?,?)", ("inception_date", "2026-04-15"))
     print("[storage] Seed data inserted.")
 
 
@@ -222,7 +232,7 @@ def save_holding(ticker: str, name: str, eur_allocation: float,
             entry_price_eur = COALESCE(excluded.entry_price_eur, holdings.entry_price_eur)
     """, (ticker.upper(), name, eur_allocation, asset_class, currency,
           region, effective_date, int(active), notes, entry_price_eur))
-    _exec("INSERT OR REPLACE INTO meta(key,value) VALUES('last_updated',?)", (_now,))
+    _exec("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", ("last_updated", _now))
 
 
 def delete_holding(ticker: str) -> None:
@@ -235,7 +245,7 @@ def deactivate_holding(ticker: str) -> None:
 
 def get_meta(key: str, default: str = "") -> str:
     _, rows = _query("SELECT value FROM meta WHERE key = ?", (key,))
-    return rows[0][0] if rows else default
+    return str(rows[0][0]) if rows and rows[0][0] is not None else default
 
 
 def set_meta(key: str, value: str) -> None:
@@ -243,7 +253,7 @@ def set_meta(key: str, value: str) -> None:
 
 
 def create_rebalance_snapshot(description: str = "") -> int:
-    holdings = get_holdings(active_only=True).to_dict(orient="records")
+    holdings   = get_holdings(active_only=True).to_dict(orient="records")
     event_date = datetime.utcnow().strftime("%Y-%m-%d")
     if _USE_TURSO:
         _turso_execute(
@@ -251,24 +261,23 @@ def create_rebalance_snapshot(description: str = "") -> int:
             [event_date, description, json.dumps(holdings)]
         )
         _, rows = _query("SELECT MAX(id) FROM rebalances")
-        return rows[0][0] if rows else 0
-    else:
-        conn = _local_conn()
-        cur = conn.execute(
-            "INSERT INTO rebalances(event_date, description, snapshot_json) VALUES(?,?,?)",
-            (event_date, description, json.dumps(holdings))
-        )
-        conn.commit()
-        rowid = cur.lastrowid
-        conn.close()
-        return rowid
+        return int(rows[0][0]) if rows and rows[0][0] is not None else 0
+    conn = _local_conn()
+    cur  = conn.execute(
+        "INSERT INTO rebalances(event_date, description, snapshot_json) VALUES(?,?,?)",
+        (event_date, description, json.dumps(holdings))
+    )
+    conn.commit()
+    rowid = cur.lastrowid
+    conn.close()
+    return rowid
 
 
 def get_rebalance_events() -> pd.DataFrame:
     cols, rows = _query(
         "SELECT id, event_date, description FROM rebalances ORDER BY event_date DESC"
     )
-    return pd.DataFrame(rows, columns=["id","event_date","description"])
+    return pd.DataFrame(rows, columns=["id", "event_date", "description"])
 
 
 def get_rebalance_items(event_id: int) -> pd.DataFrame:
@@ -279,21 +288,18 @@ def get_rebalance_items(event_id: int) -> pd.DataFrame:
 
 
 def init_position_updates_table():
-    pass  # Table created in init_db()
+    pass  # Created in init_db()
 
 
 def log_position_update(ticker: str, previous_allocation: float,
-                         new_allocation: float, note: str = "") -> None:
-    if new_allocation > previous_allocation:
-        direction = "Increased"
-    elif new_allocation < previous_allocation:
-        direction = "Reduced"
-    else:
-        direction = "Unchanged"
+                        new_allocation: float, note: str = "") -> None:
+    direction = ("Increased" if new_allocation > previous_allocation
+                 else "Reduced" if new_allocation < previous_allocation
+                 else "Unchanged")
     _exec("""
         INSERT INTO position_updates
             (ticker, update_date, previous_allocation, new_allocation, direction, note)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?,?,?,?,?,?)
     """, (ticker.upper(), date.today().isoformat(),
           previous_allocation, new_allocation, direction, note))
 
