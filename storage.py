@@ -1,11 +1,13 @@
 """
-storage.py — persistence layer using Turso (libSQL) for cloud deployments,
-falling back to local SQLite for development if TURSO_URL is not set.
+storage.py — persistence layer using Turso HTTP API (no libsql_experimental).
+Uses httpx to call Turso's REST endpoint directly. Falls back to local SQLite
+for development if TURSO_URL / TURSO_TOKEN are not set.
 """
 
 import os
 import json
-import libsql_experimental as libsql
+import sqlite3
+import httpx
 from datetime import datetime, date
 from typing import Optional
 import pandas as pd
@@ -17,24 +19,93 @@ TURSO_URL   = os.getenv("TURSO_URL", "")
 TURSO_TOKEN = os.getenv("TURSO_TOKEN", "")
 DB_PATH     = os.getenv("DB_PATH", "data/portfolio.db")
 
+_USE_TURSO = bool(TURSO_URL and TURSO_TOKEN)
 
-def get_conn():
-    if TURSO_URL and TURSO_TOKEN:
-        conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+
+def _turso_execute(sql: str, params: list = None):
+    params = params or []
+    typed = []
+    for p in params:
+        if p is None:
+            typed.append({"type": "null", "value": None})
+        elif isinstance(p, bool):
+            typed.append({"type": "integer", "value": int(p)})
+        elif isinstance(p, int):
+            typed.append({"type": "integer", "value": p})
+        elif isinstance(p, float):
+            typed.append({"type": "float", "value": p})
+        else:
+            typed.append({"type": "text", "value": str(p)})
+    payload = {
+        "requests": [
+            {"type": "execute", "stmt": {"sql": sql, "args": typed}},
+            {"type": "close"}
+        ]
+    }
+    headers = {
+        "Authorization": f"Bearer {TURSO_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    url = TURSO_URL.rstrip("/") + "/v2/pipeline"
+    resp = httpx.post(url, json=payload, headers=headers, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    result = data["results"][0]
+    if result["type"] == "error":
+        raise RuntimeError(f"Turso error: {result['error']}")
+    rs = result.get("response", {}).get("result", {})
+    cols = [c["name"] for c in rs.get("cols", [])]
+    rows = []
+    for row in rs.get("rows", []):
+        rows.append(tuple(cell.get("value") for cell in row))
+    return cols, rows
+
+
+def _turso_executescript(sql_script: str):
+    statements = [s.strip() for s in sql_script.split(";") if s.strip()]
+    requests = []
+    for stmt in statements:
+        requests.append({"type": "execute", "stmt": {"sql": stmt, "args": []}})
+    requests.append({"type": "close"})
+    payload = {"requests": requests}
+    headers = {
+        "Authorization": f"Bearer {TURSO_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    url = TURSO_URL.rstrip("/") + "/v2/pipeline"
+    resp = httpx.post(url, json=payload, headers=headers, timeout=15)
+    resp.raise_for_status()
+
+
+def _local_conn():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    return sqlite3.connect(DB_PATH)
+
+
+def _query(sql: str, params: tuple = ()) -> tuple:
+    if _USE_TURSO:
+        return _turso_execute(sql, list(params))
     else:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        conn = libsql.connect(DB_PATH)
-    return conn
+        conn = _local_conn()
+        cur = conn.execute(sql, params)
+        cols = [d[0] for d in (cur.description or [])]
+        rows = cur.fetchall()
+        conn.close()
+        return cols, rows
 
 
-def _exec(conn, sql: str, params: tuple = ()):
-    conn.execute(sql, params)
-    conn.commit()
+def _exec(sql: str, params: tuple = ()):
+    if _USE_TURSO:
+        _turso_execute(sql, list(params))
+    else:
+        conn = _local_conn()
+        conn.execute(sql, params)
+        conn.commit()
+        conn.close()
 
 
 def init_db():
-    conn = get_conn()
-    conn.executescript("""
+    script = """
         CREATE TABLE IF NOT EXISTS holdings (
             ticker          TEXT PRIMARY KEY,
             name            TEXT NOT NULL,
@@ -65,43 +136,48 @@ def init_db():
             new_allocation       REAL NOT NULL,
             direction            TEXT NOT NULL,
             note                 TEXT DEFAULT ''
-        );
-    """)
-    conn.commit()
+        )
+    """
+    if _USE_TURSO:
+        _turso_executescript(script)
+    else:
+        conn = _local_conn()
+        conn.executescript(script)
+        conn.commit()
+        conn.close()
 
 
 def seed_database():
-    conn = get_conn()
-    count = conn.execute("SELECT COUNT(*) FROM holdings").fetchone()[0]
+    _, rows = _query("SELECT COUNT(*) FROM holdings")
+    count = rows[0][0] if rows else 0
     if count > 0:
         print("[storage] Database already populated — skipping seed.")
         return
     seed = [
-        ("IWDA.AS", "iShares Core MSCI World ETF",     35000, "ETF",     "USD", "Global", "2026-04-15", 1, "", None),
-        ("EIMI.AS", "iShares Core MSCI EM IMI ETF",    15000, "ETF",     "USD", "EM",     "2026-04-15", 1, "", None),
-        ("IUSN.AS", "iShares MSCI World Small Cap ETF",10000, "ETF",     "USD", "Global", "2026-04-15", 1, "", None),
-        ("ASML.AS", "ASML Holding",                    12000, "Equity",  "EUR", "Europe", "2026-04-15", 1, "", None),
-        ("XGIU.AS", "Xtrackers Global Infl Bond ETF",  10000, "Bond ETF","EUR", "Global", "2026-04-15", 1, "", None),
-        ("AAPL",    "Apple Inc.",                       8000, "Equity",  "USD", "US",     "2026-04-15", 1, "", None),
-        ("BTC-EUR", "Bitcoin",                          5000, "Crypto",  "EUR", "Global", "2026-04-15", 1, "", None),
-        ("CASH",    "EUR Cash / Money Market",          5000, "Cash",    "EUR", "Global", "2026-04-15", 1, "", None),
+        ("IWDA.AS", "iShares Core MSCI World ETF",      35000, "ETF",      "USD", "Global", "2026-04-15", 1, "", None),
+        ("EMIM.AS", "iShares Core MSCI EM IMI ETF",     15000, "ETF",      "USD", "EM",     "2026-04-15", 1, "", None),
+        ("IUSN.DE", "iShares MSCI World Small Cap ETF", 10000, "ETF",      "USD", "Global", "2026-04-15", 1, "", None),
+        ("ASML.AS", "ASML Holding",                     12000, "Equity",   "EUR", "Europe", "2026-04-15", 1, "", None),
+        ("XGIN.DE", "Xtrackers Global Infl Bond ETF",   10000, "Bond ETF", "EUR", "Global", "2026-04-15", 1, "", None),
+        ("AAPL",    "Apple Inc.",                         8000, "Equity",   "USD", "US",     "2026-04-15", 1, "", None),
+        ("BTC-EUR", "Bitcoin",                            5000, "Crypto",   "EUR", "Global", "2026-04-15", 1, "", None),
+        ("CASH",    "EUR Cash / Money Market",            5000, "Cash",     "EUR", "Global", "2026-04-15", 1, "", None),
     ]
     for row in seed:
-        conn.execute("INSERT OR IGNORE INTO holdings VALUES (?,?,?,?,?,?,?,?,?,?)", row)
-    conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES ('inception_date','2026-04-15')")
-    conn.commit()
+        _exec("INSERT OR IGNORE INTO holdings VALUES (?,?,?,?,?,?,?,?,?,?)", row)
+    _exec("INSERT OR IGNORE INTO meta(key,value) VALUES ('inception_date','2026-04-15')")
     print("[storage] Seed data inserted.")
 
 
 def get_holdings(active_only: bool = True) -> pd.DataFrame:
-    conn = get_conn()
-    query = "SELECT * FROM holdings"
+    sql = "SELECT * FROM holdings"
     if active_only:
-        query += " WHERE active = 1"
-    query += " ORDER BY eur_allocation DESC"
-    rows = conn.execute(query).fetchall()
-    cols = ["ticker","name","eur_allocation","asset_class","currency",
-            "region","effective_date","active","notes","entry_price_eur"]
+        sql += " WHERE active = 1"
+    sql += " ORDER BY eur_allocation DESC"
+    cols, rows = _query(sql)
+    if not cols:
+        cols = ["ticker","name","eur_allocation","asset_class","currency",
+                "region","effective_date","active","notes","entry_price_eur"]
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -110,9 +186,8 @@ def save_holding(ticker: str, name: str, eur_allocation: float,
                  region: str = "", effective_date: str = "",
                  active: int = 1, notes: str = "",
                  entry_price_eur: float = None) -> None:
-    conn = get_conn()
     _now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-    conn.execute("""
+    _exec("""
         INSERT INTO holdings
             (ticker, name, eur_allocation, asset_class, currency, region,
              effective_date, active, notes, entry_price_eur)
@@ -129,66 +204,64 @@ def save_holding(ticker: str, name: str, eur_allocation: float,
             entry_price_eur = COALESCE(excluded.entry_price_eur, holdings.entry_price_eur)
     """, (ticker.upper(), name, eur_allocation, asset_class, currency,
           region, effective_date, int(active), notes, entry_price_eur))
-    conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('last_updated',?)", (_now,))
-    conn.commit()
+    _exec("INSERT OR REPLACE INTO meta(key,value) VALUES('last_updated',?)", (_now,))
 
 
 def delete_holding(ticker: str) -> None:
-    conn = get_conn()
-    conn.execute("DELETE FROM holdings WHERE ticker = ?", (ticker.upper(),))
-    conn.commit()
+    _exec("DELETE FROM holdings WHERE ticker = ?", (ticker.upper(),))
 
 
 def deactivate_holding(ticker: str) -> None:
-    conn = get_conn()
-    conn.execute("UPDATE holdings SET active = 0 WHERE ticker = ?", (ticker.upper(),))
-    conn.commit()
+    _exec("UPDATE holdings SET active = 0 WHERE ticker = ?", (ticker.upper(),))
 
 
 def get_meta(key: str, default: str = "") -> str:
-    conn = get_conn()
-    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
-    return row[0] if row else default
+    _, rows = _query("SELECT value FROM meta WHERE key = ?", (key,))
+    return rows[0][0] if rows else default
 
 
 def set_meta(key: str, value: str) -> None:
-    conn = get_conn()
-    conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (key, value))
-    conn.commit()
+    _exec("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (key, value))
 
 
 def create_rebalance_snapshot(description: str = "") -> int:
-    conn = get_conn()
     holdings = get_holdings(active_only=True).to_dict(orient="records")
     event_date = datetime.utcnow().strftime("%Y-%m-%d")
-    cur = conn.execute(
-        "INSERT INTO rebalances(event_date, description, snapshot_json) VALUES(?,?,?)",
-        (event_date, description, json.dumps(holdings))
-    )
-    conn.commit()
-    return cur.lastrowid
+    if _USE_TURSO:
+        _turso_execute(
+            "INSERT INTO rebalances(event_date, description, snapshot_json) VALUES(?,?,?)",
+            [event_date, description, json.dumps(holdings)]
+        )
+        _, rows = _query("SELECT MAX(id) FROM rebalances")
+        return rows[0][0] if rows else 0
+    else:
+        conn = _local_conn()
+        cur = conn.execute(
+            "INSERT INTO rebalances(event_date, description, snapshot_json) VALUES(?,?,?)",
+            (event_date, description, json.dumps(holdings))
+        )
+        conn.commit()
+        rowid = cur.lastrowid
+        conn.close()
+        return rowid
 
 
 def get_rebalance_events() -> pd.DataFrame:
-    conn = get_conn()
-    rows = conn.execute(
+    cols, rows = _query(
         "SELECT id, event_date, description FROM rebalances ORDER BY event_date DESC"
-    ).fetchall()
+    )
     return pd.DataFrame(rows, columns=["id","event_date","description"])
 
 
 def get_rebalance_items(event_id: int) -> pd.DataFrame:
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT snapshot_json FROM rebalances WHERE id = ?", (event_id,)
-    ).fetchone()
-    if not row or not row[0]:
+    _, rows = _query("SELECT snapshot_json FROM rebalances WHERE id = ?", (event_id,))
+    if not rows or not rows[0][0]:
         return pd.DataFrame()
-    return pd.DataFrame(json.loads(row[0]))
+    return pd.DataFrame(json.loads(rows[0][0]))
 
 
 def init_position_updates_table():
-    pass  # Table created in init_db()
+    pass
 
 
 def log_position_update(ticker: str, previous_allocation: float,
@@ -199,21 +272,19 @@ def log_position_update(ticker: str, previous_allocation: float,
         direction = "Reduced"
     else:
         direction = "Unchanged"
-    conn = get_conn()
-    conn.execute("""
+    _exec("""
         INSERT INTO position_updates
             (ticker, update_date, previous_allocation, new_allocation, direction, note)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (ticker.upper(), date.today().isoformat(),
           previous_allocation, new_allocation, direction, note))
-    conn.commit()
 
 
 def get_position_updates() -> pd.DataFrame:
-    conn = get_conn()
-    rows = conn.execute(
+    cols, rows = _query(
         "SELECT * FROM position_updates ORDER BY update_date DESC, id DESC"
-    ).fetchall()
-    cols = ["id","ticker","update_date","previous_allocation",
-            "new_allocation","direction","note"]
+    )
+    if not cols:
+        cols = ["id","ticker","update_date","previous_allocation",
+                "new_allocation","direction","note"]
     return pd.DataFrame(rows, columns=cols)
