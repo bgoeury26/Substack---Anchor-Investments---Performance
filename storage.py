@@ -1,8 +1,6 @@
 """
-storage.py — persistence layer using local SQLite3 (no external dependencies).
-Drop-in replacement for the original libsql_experimental version.
+storage.py — SQLite3 persistence layer (no external dependencies).
 """
-
 import os
 import json
 import sqlite3
@@ -22,11 +20,6 @@ def get_conn():
     return conn
 
 
-def _exec(conn, sql: str, params: tuple = ()):
-    conn.execute(sql, params)
-    conn.commit()
-
-
 def init_db():
     conn = get_conn()
     conn.executescript("""
@@ -43,27 +36,31 @@ def init_db():
             entry_price_eur REAL DEFAULT NULL
         );
         CREATE TABLE IF NOT EXISTS rebalances (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_date      TEXT NOT NULL,
-            description     TEXT DEFAULT '',
-            snapshot_json   TEXT DEFAULT '{}'
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_date    TEXT NOT NULL,
+            description   TEXT DEFAULT '',
+            snapshot_json TEXT DEFAULT '{}'
         );
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
         CREATE TABLE IF NOT EXISTS position_updates (
-            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker               TEXT NOT NULL,
-            update_date          TEXT NOT NULL,
-            previous_allocation  REAL NOT NULL,
-            new_allocation       REAL NOT NULL,
-            direction            TEXT NOT NULL,
-            note                 TEXT DEFAULT ''
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker              TEXT NOT NULL,
+            update_date         TEXT NOT NULL,
+            previous_allocation REAL NOT NULL,
+            new_allocation      REAL NOT NULL,
+            direction           TEXT NOT NULL,
+            note                TEXT DEFAULT ''
         );
     """)
     conn.commit()
     conn.close()
+
+
+def init_position_updates_table():
+    pass  # already created in init_db()
 
 
 def seed_database():
@@ -99,8 +96,8 @@ def get_holdings(active_only: bool = True) -> pd.DataFrame:
     query += " ORDER BY eur_allocation DESC"
     rows = conn.execute(query).fetchall()
     conn.close()
-    cols = ["ticker", "name", "eur_allocation", "asset_class", "currency",
-            "region", "effective_date", "active", "notes", "entry_price_eur"]
+    cols = ["ticker","name","eur_allocation","asset_class","currency",
+            "region","effective_date","active","notes","entry_price_eur"]
     return pd.DataFrame([dict(r) for r in rows], columns=cols)
 
 
@@ -113,8 +110,8 @@ def save_holding(ticker: str, name: str, eur_allocation: float,
     _now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
     conn.execute("""
         INSERT INTO holdings
-            (ticker, name, eur_allocation, asset_class, currency, region,
-             effective_date, active, notes, entry_price_eur)
+            (ticker,name,eur_allocation,asset_class,currency,region,
+             effective_date,active,notes,entry_price_eur)
         VALUES (?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(ticker) DO UPDATE SET
             name            = excluded.name,
@@ -166,7 +163,7 @@ def create_rebalance_snapshot(description: str = "") -> int:
     event_date = datetime.utcnow().strftime("%Y-%m-%d")
     conn = get_conn()
     cur = conn.execute(
-        "INSERT INTO rebalances(event_date, description, snapshot_json) VALUES(?,?,?)",
+        "INSERT INTO rebalances(event_date,description,snapshot_json) VALUES(?,?,?)",
         (event_date, description, json.dumps(holdings))
     )
     conn.commit()
@@ -181,7 +178,7 @@ def get_rebalance_events() -> pd.DataFrame:
         "SELECT id, event_date, description FROM rebalances ORDER BY event_date DESC"
     ).fetchall()
     conn.close()
-    return pd.DataFrame([dict(r) for r in rows], columns=["id", "event_date", "description"])
+    return pd.DataFrame([dict(r) for r in rows], columns=["id","event_date","description"])
 
 
 def get_rebalance_items(event_id: int) -> pd.DataFrame:
@@ -195,23 +192,15 @@ def get_rebalance_items(event_id: int) -> pd.DataFrame:
     return pd.DataFrame(json.loads(row[0]))
 
 
-def init_position_updates_table():
-    pass  # Table created in init_db()
-
-
 def log_position_update(ticker: str, previous_allocation: float,
                         new_allocation: float, note: str = "") -> None:
-    if new_allocation > previous_allocation:
-        direction = "Increased"
-    elif new_allocation < previous_allocation:
-        direction = "Reduced"
-    else:
-        direction = "Unchanged"
+    direction = "Increased" if new_allocation > previous_allocation else \
+                "Reduced" if new_allocation < previous_allocation else "Unchanged"
     conn = get_conn()
     conn.execute("""
         INSERT INTO position_updates
-            (ticker, update_date, previous_allocation, new_allocation, direction, note)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (ticker,update_date,previous_allocation,new_allocation,direction,note)
+        VALUES (?,?,?,?,?,?)
     """, (ticker.upper(), date.today().isoformat(),
           previous_allocation, new_allocation, direction, note))
     conn.commit()
@@ -224,6 +213,6 @@ def get_position_updates() -> pd.DataFrame:
         "SELECT * FROM position_updates ORDER BY update_date DESC, id DESC"
     ).fetchall()
     conn.close()
-    cols = ["id", "ticker", "update_date", "previous_allocation",
-            "new_allocation", "direction", "note"]
+    cols = ["id","ticker","update_date","previous_allocation",
+            "new_allocation","direction","note"]
     return pd.DataFrame([dict(r) for r in rows], columns=cols)
