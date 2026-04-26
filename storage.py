@@ -19,10 +19,18 @@ TURSO_URL   = os.getenv("TURSO_URL", "")
 TURSO_TOKEN = os.getenv("TURSO_TOKEN", "")
 DB_PATH     = os.getenv("DB_PATH", "data/portfolio.db")
 
-_USE_TURSO = bool(TURSO_URL and TURSO_TOKEN)
+# Normalise Turso URL: the native driver uses libsql:// or libsql+wss://
+# but httpx needs https://
+_TURSO_HTTP_URL = (TURSO_URL
+    .replace("libsql+wss://", "https://")
+    .replace("libsql://", "https://"))
+_USE_TURSO = bool(_TURSO_HTTP_URL and TURSO_TOKEN)
 
+
+# ── Turso HTTP helpers ────────────────────────────────────────────────────────
 
 def _turso_execute(sql: str, params: list = None):
+    """Execute a single SQL statement against Turso via HTTP and return rows."""
     params = params or []
     typed = []
     for p in params:
@@ -36,6 +44,7 @@ def _turso_execute(sql: str, params: list = None):
             typed.append({"type": "float", "value": p})
         else:
             typed.append({"type": "text", "value": str(p)})
+
     payload = {
         "requests": [
             {"type": "execute", "stmt": {"sql": sql, "args": typed}},
@@ -46,7 +55,7 @@ def _turso_execute(sql: str, params: list = None):
         "Authorization": f"Bearer {TURSO_TOKEN}",
         "Content-Type": "application/json"
     }
-    url = TURSO_URL.rstrip("/") + "/v2/pipeline"
+    url = _TURSO_HTTP_URL.rstrip("/") + "/v2/pipeline"
     resp = httpx.post(url, json=payload, headers=headers, timeout=15)
     resp.raise_for_status()
     data = resp.json()
@@ -62,6 +71,7 @@ def _turso_execute(sql: str, params: list = None):
 
 
 def _turso_executescript(sql_script: str):
+    """Execute multiple semicolon-separated statements on Turso."""
     statements = [s.strip() for s in sql_script.split(";") if s.strip()]
     requests = []
     for stmt in statements:
@@ -72,17 +82,22 @@ def _turso_executescript(sql_script: str):
         "Authorization": f"Bearer {TURSO_TOKEN}",
         "Content-Type": "application/json"
     }
-    url = TURSO_URL.rstrip("/") + "/v2/pipeline"
+    url = _TURSO_HTTP_URL.rstrip("/") + "/v2/pipeline"
     resp = httpx.post(url, json=payload, headers=headers, timeout=15)
     resp.raise_for_status()
 
+
+# ── Local SQLite helpers ──────────────────────────────────────────────────────
 
 def _local_conn():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     return sqlite3.connect(DB_PATH)
 
 
+# ── Unified execute ───────────────────────────────────────────────────────────
+
 def _query(sql: str, params: tuple = ()) -> tuple:
+    """Returns (cols, rows). Works for both Turso and local SQLite."""
     if _USE_TURSO:
         return _turso_execute(sql, list(params))
     else:
@@ -95,6 +110,7 @@ def _query(sql: str, params: tuple = ()) -> tuple:
 
 
 def _exec(sql: str, params: tuple = ()):
+    """Execute a write statement (no return value needed)."""
     if _USE_TURSO:
         _turso_execute(sql, list(params))
     else:
@@ -103,6 +119,8 @@ def _exec(sql: str, params: tuple = ()):
         conn.commit()
         conn.close()
 
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def init_db():
     script = """
@@ -261,7 +279,7 @@ def get_rebalance_items(event_id: int) -> pd.DataFrame:
 
 
 def init_position_updates_table():
-    pass
+    pass  # Table created in init_db()
 
 
 def log_position_update(ticker: str, previous_allocation: float,
