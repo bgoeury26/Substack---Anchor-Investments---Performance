@@ -103,9 +103,12 @@ python migrate_legacy.py legacy_data/legacy_portfolio.db
 
 This creates one BUY transaction per active holding (skipping the CASH row,
 which just folds into the starting cash balance) at its recorded entry
-price, or — for the one holding that had no recorded entry price (AMZN) —
-the historical closing price on its effective date, fetched live. Review the
-Changes tab afterwards to confirm it landed correctly.
+price. NBIS, GDX and EIMI.L were labelled EUR in the old data but are quoted
+in USD, so they are booked as USD with the entry price converted at that
+day's USD/EUR close. The one holding with no recorded entry price (AMZN) is
+skipped and reported rather than guessed: enter it yourself from the Admin
+Trade form, with currency USD. Review the Changes tab afterwards to confirm
+it landed correctly.
 
 ---
 

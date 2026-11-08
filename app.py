@@ -558,8 +558,8 @@ if tab_admin is not None:
             else:
                 for _, row in full_ledger.sort_values(["tx_date", "id"], ascending=False).iterrows():
                     label = f"{row['tx_date']} — {row['tx_type']}"
-                    if row["ticker"]:
-                        label += f" {row['quantity']:,.4f} {row['ticker']} @ €{row['price_eur']:,.4f}" if row["quantity"] else f" {row['ticker']}"
+                    if pd.notna(row["ticker"]) and row["ticker"]:
+                        label += f" {row['quantity']:,.4f} {row['ticker']} @ €{row['price_eur']:,.4f}" if pd.notna(row["quantity"]) else f" {row['ticker']}"
                     label += f" — {_fmt_eur(row['cash_amount_eur'])}"
                     if row["voided"]:
                         label = f"❌ VOIDED — {label}"
@@ -603,7 +603,7 @@ with tab_changes:
                 </div>
                 <div style="min-width:90px;">
                     <div class="tx-field-label">Ticker</div>
-                    <div class="tx-field-value" style="color:#e2e8f0;font-weight:700;">{row['ticker'] or '—'}</div>
+                    <div class="tx-field-value" style="color:#e2e8f0;font-weight:700;">{row['ticker'] if pd.notna(row['ticker']) and row['ticker'] else '—'}</div>
                 </div>
                 <div style="min-width:90px;">
                     <div class="tx-field-label">Qty</div>

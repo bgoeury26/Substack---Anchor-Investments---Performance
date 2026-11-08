@@ -109,20 +109,16 @@ def _yfinance_spot_batch(tickers: list) -> dict:
             progress=False, threads=True, auto_adjust=False,
         )
         result = {}
-        if len(tickers) == 1:
-            t = tickers[0]
-            if not data.empty and "Close" in data:
-                closes = data["Close"].dropna()
+        # group_by="ticker" yields (ticker, field) columns even for a single
+        # ticker on current yfinance; older versions returned flat columns.
+        multi_level = data.columns.nlevels > 1
+        for t in tickers:
+            try:
+                closes = (data[t]["Close"] if multi_level else data["Close"]).dropna()
                 if not closes.empty:
                     result[t] = float(closes.iloc[-1])
-        else:
-            for t in tickers:
-                try:
-                    closes = data[t]["Close"].dropna()
-                    if not closes.empty:
-                        result[t] = float(closes.iloc[-1])
-                except Exception:
-                    continue
+            except Exception:
+                continue
         return result
 
     result, err = _retry(_fetch)
@@ -211,6 +207,7 @@ def get_fx_rate(from_currency: str, to_currency: str = "EUR") -> float:
     prices = _yfinance_spot_batch([pair])
     rate = prices.get(pair)
     if rate:
+        db.set_cached_price(pair, rate)  # so a later rate-limit falls back to this, not 1.0
         return rate
     cached = db.get_cached_price(pair)
     return cached["price"] if cached and cached["price"] else 1.0

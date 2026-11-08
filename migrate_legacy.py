@@ -6,8 +6,10 @@ transaction-ledger schema (db.py).
 The old model had no concept of trades — a holding was just "€X allocated
 to ticker Y". This script turns each active, non-CASH holding into an
 opening BUY transaction of size €eur_allocation at its recorded
-entry_price_eur (or, if that's missing, the historical closing price on
-its effective_date, fetched from Yahoo Finance).
+entry_price_eur.
+
+A holding with no recorded entry price is never given a guessed one: it is
+skipped and reported, to be entered by hand from the Admin Trade form.
 
 The old CASH row and any unallocated portion of the €100,000 base capital
 both fold naturally into the new model's cash balance — they don't need
@@ -26,23 +28,25 @@ already has transactions).
 import sys
 import sqlite3
 import argparse
-from datetime import date
+from datetime import date, timedelta
 
 import db
 from config import STARTING_CASH
-from data_loader import get_price_history, get_fx_rate
+from data_loader import get_fx_history, get_fx_rate
+
+# The legacy rows for these tickers say currency=EUR, but Yahoo quotes them in
+# USD and their recorded entry_price_eur is the raw USD close on that date. They
+# are booked as USD, with the entry price converted at that day's USD/EUR close.
+USD_QUOTED_AS_EUR = {"NBIS", "GDX", "EIMI.L", "AMZN"}
 
 
-def _closing_price_eur(ticker: str, currency: str, effective_date: str):
-    df = get_price_history(ticker, effective_date, None)
+def _usd_eur_on(day: str):
+    """USD/EUR close on `day`, or the next day with a quote. None if unavailable."""
+    end = (date.fromisoformat(day) + timedelta(days=7)).isoformat()
+    df = get_fx_history("USD", "EUR", day, end)
     if df.empty:
         return None
-    df = df.sort_values("date")
-    close_local = float(df.iloc[0]["close"])
-    if currency and currency.upper() != "EUR":
-        fx = get_fx_rate(currency, "EUR")
-        return close_local * (fx or 1.0)
-    return close_local
+    return float(df.sort_values("date").iloc[0]["close"])
 
 
 def main():
@@ -69,12 +73,10 @@ def main():
         sys.exit(0)
 
     inception = min(r["effective_date"] for r in rows) or date.today().isoformat()
-    db.set_meta("starting_cash", str(args.starting_cash))
-    db.set_meta("inception_date", inception)
 
-    total_bought = 0.0
-    print(f"Starting cash: €{args.starting_cash:,.2f}    Inception date: {inception}\n")
-
+    # Resolve every trade before writing any, so a failed FX lookup can't leave
+    # a half-migrated ledger that the guard above would then refuse to redo.
+    planned, skipped = [], []
     for r in rows:
         ticker = r["ticker"].upper()
         if ticker == "CASH":
@@ -82,35 +84,49 @@ def main():
             continue
 
         alloc = float(r["eur_allocation"])
-        currency = r["currency"] or "EUR"
+        day = r["effective_date"]
+        currency = "USD" if ticker in USD_QUOTED_AS_EUR else (r["currency"] or "EUR")
         entry_px = r["entry_price_eur"]
-        source = "recorded entry price"
 
         if not entry_px or entry_px <= 0:
-            entry_px = _closing_price_eur(ticker, currency, r["effective_date"])
-            source = "fetched historical close"
-
-        if not entry_px or entry_px <= 0:
-            print(f"  ⚠ {ticker}: no entry price available (recorded or fetched) — SKIPPED. "
-                  f"Add this position manually from the Admin tab.")
+            skipped.append(f"{ticker}: €{alloc:,.2f}, currency {currency}, legacy date {day}")
             continue
 
-        qty = alloc / entry_px
-        fx_now = get_fx_rate(currency, "EUR") if currency != "EUR" else 1.0
-        price_local = entry_px / (fx_now or 1.0)
+        if ticker in USD_QUOTED_AS_EUR:
+            fx = _usd_eur_on(day)
+            if not fx:
+                print(f"Aborting, nothing was written: no USD/EUR rate available for {day} ({ticker}).")
+                sys.exit(1)
+            price_local, entry_px = entry_px, entry_px * fx
+            source = f"recorded USD entry price, converted at {fx:.4f} USD/EUR"
+        else:
+            fx = get_fx_rate(currency, "EUR") if currency != "EUR" else 1.0
+            price_local = entry_px / (fx or 1.0)
+            source = "recorded entry price"
 
-        db.add_transaction(
-            tx_date=r["effective_date"], tx_type="BUY", cash_amount_eur=-alloc,
+        planned.append(dict(
+            tx_date=day, tx_type="BUY", cash_amount_eur=-alloc,
             ticker=ticker, name=r["name"], asset_class=r["asset_class"] or "Equity",
-            currency=currency, quantity=qty, price_local=price_local,
-            fx_rate=fx_now, price_eur=entry_px, fees_eur=0.0,
+            currency=currency, quantity=alloc / entry_px, price_local=price_local,
+            fx_rate=fx, price_eur=entry_px, fees_eur=0.0,
             notes=f"Migrated from legacy allocation model ({source}).",
-        )
-        total_bought += alloc
-        print(f"  ✓ {ticker}: BUY {qty:,.4f} units @ €{entry_px:,.4f}  (€{alloc:,.2f}, {source})")
+        ))
+
+    db.set_meta("starting_cash", str(args.starting_cash))
+    db.set_meta("inception_date", inception)
+    print(f"Starting cash: €{args.starting_cash:,.2f}    Inception date: {inception}\n")
+
+    total_bought = 0.0
+    for tx in planned:
+        db.add_transaction(**tx)
+        total_bought -= tx["cash_amount_eur"]
+        print(f"  ✓ {tx['ticker']}: BUY {tx['quantity']:,.4f} units @ €{tx['price_eur']:,.4f}  "
+              f"(€{-tx['cash_amount_eur']:,.2f}, {tx['notes']})")
 
     cash_after = args.starting_cash - total_bought
     print(f"\nMigrated. Cash balance after opening trades: €{cash_after:,.2f}")
+    for line in skipped:
+        print(f"  ⚠ NOT MIGRATED, no recorded entry price. Enter from the Admin Trade form — {line}")
     print("Review the Changes tab in the app to confirm everything landed correctly.")
 
 
