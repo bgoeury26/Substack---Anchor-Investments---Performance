@@ -1,31 +1,40 @@
 """
-auth.py — Admin authentication for the portfolio dashboard.
+auth.py — Admin authentication.
 
-Uses bcrypt for password hashing. The password hash is stored in
-environment variables / Streamlit secrets — never in the source code.
-
-Usage
------
-Generate a hash once:
-    python -c "import bcrypt; print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())"
-Paste the result into .env as ADMIN_PASSWORD_HASH=<hash>
+Password is never stored in source code: only a bcrypt hash, supplied via
+Streamlit secrets or an environment variable (see config.py). A short
+per-session lockout after repeated failed attempts discourages naive
+brute-forcing without needing any extra infrastructure.
 """
 
+import time
 import bcrypt
 import streamlit as st
 from config import ADMIN_USERNAME, ADMIN_PASSWORD_HASH
 
+MAX_ATTEMPTS = 5
+LOCKOUT_SECONDS = 60
+
 
 def _check_password(plain: str, hashed: str) -> bool:
-    """Return True if plain text matches the stored bcrypt hash."""
     try:
         return bcrypt.checkpw(plain.encode(), hashed.encode())
     except Exception:
         return False
 
 
+def _locked_out() -> bool:
+    until = st.session_state.get("login_lockout_until", 0)
+    return time.time() < until
+
+
 def login_form() -> None:
     """Render a compact login form. Sets st.session_state.authenticated on success."""
+    if _locked_out():
+        remaining = int(st.session_state["login_lockout_until"] - time.time())
+        st.error(f"Too many failed attempts. Try again in {remaining}s.")
+        return
+
     st.markdown("### 🔐 Admin Login")
     with st.form("login_form", clear_on_submit=True):
         username = st.text_input("Username")
@@ -35,17 +44,24 @@ def login_form() -> None:
     if submitted:
         if not ADMIN_PASSWORD_HASH:
             st.error(
-                "No admin password configured. "
-                "Set ADMIN_PASSWORD_HASH in your .env or Streamlit secrets."
+                "No admin password configured. Set ADMIN_PASSWORD_HASH in "
+                "Streamlit secrets or your .env file."
             )
             return
         if username == ADMIN_USERNAME and _check_password(password, ADMIN_PASSWORD_HASH):
             st.session_state["authenticated"] = True
             st.session_state["username"] = username
+            st.session_state["failed_attempts"] = 0
             st.success("Logged in successfully.")
             st.rerun()
         else:
-            st.error("Invalid credentials.")
+            st.session_state["failed_attempts"] = st.session_state.get("failed_attempts", 0) + 1
+            if st.session_state["failed_attempts"] >= MAX_ATTEMPTS:
+                st.session_state["login_lockout_until"] = time.time() + LOCKOUT_SECONDS
+                st.session_state["failed_attempts"] = 0
+                st.error(f"Too many failed attempts. Locked for {LOCKOUT_SECONDS}s.")
+            else:
+                st.error("Invalid credentials.")
 
 
 def logout() -> None:
@@ -55,15 +71,10 @@ def logout() -> None:
 
 
 def is_authenticated() -> bool:
-    """Return True if the current session is an authenticated admin."""
     return bool(st.session_state.get("authenticated", False))
 
 
 def require_auth() -> bool:
-    """
-    Show login form if not authenticated.
-    Returns True when the user is authenticated.
-    """
     if is_authenticated():
         return True
     login_form()

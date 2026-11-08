@@ -1,5 +1,8 @@
-# .github/workflows/lint.yml
+# lint.yml
 # Runs on every push: checks Python syntax and imports.
+# (Note: this file lives at the repo root, not .github/workflows/, so it is
+# not actually wired up as a GitHub Actions workflow. Move it to
+# .github/workflows/lint.yml to activate it.)
 
 name: Lint & Check
 
@@ -26,11 +29,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Check syntax (py_compile)
-        run: python -m py_compile app.py config.py storage.py auth.py data_loader.py portfolio_engine.py charts.py
+        run: python -m py_compile app.py config.py db.py auth.py data_loader.py portfolio_engine.py charts.py migrate_legacy.py
 
       - name: Run import checks
         run: |
-          python -c "import config, storage, auth, data_loader, portfolio_engine, charts"
+          python -c "import config, db, auth, data_loader, portfolio_engine, charts"
         env:
           ADMIN_PASSWORD_HASH: "$2b$12$placeholder"
-          DB_PATH: "data/portfolio.db"
+          DATABASE_URL: "sqlite:///data/portfolio.db"

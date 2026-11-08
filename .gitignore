@@ -15,12 +15,11 @@ env/
 .env
 .streamlit/secrets.toml
 
-# SQLite database
-# Keep the dev seed if you want, otherwise exclude:
-# data/portfolio.db
-
-# Streamlit cache
-.streamlit/
+# Local SQLite database — do not commit; on Streamlit Community Cloud this
+# file is wiped on every redeploy. Use DATABASE_URL pointed at Postgres in
+# production instead (see README).
+data/portfolio.db
+data/*.db
 
 # macOS
 .DS_Store
@@ -31,4 +30,3 @@ env/
 
 # Logs
 *.log
-data/portfolio.db

@@ -1,291 +1,204 @@
-# 📊 Portfolio Dashboard
+# 📊 Anchor Investments — Portfolio Dashboard v2
 
-A production-ready **Streamlit** web application for a fictive model portfolio,
-built as a public companion to a Substack publication.
+A rebuild of the original allocation-based dashboard as a **real transactional
+cash-management system**: every Buy debits cash, every Sell credits it,
+Deposits and Withdrawals move cash directly — the same mental model as a
+brokerage account or the Yahoo Finance portfolio view. Prices are pulled
+live from Yahoo Finance.
 
-- **Fixed base capital:** EUR 100,000
-- **Persistent storage:** SQLite (local) → PostgreSQL-ready
-- **Market data:** yfinance (default) or OpenBB
-- **Admin auth:** bcrypt-hashed password, env-variable secrets
-- **Charts:** Plotly (line, donut, treemap, drawdown, contribution bar)
+- **Cash ledger:** append-only transaction log; cash balance and positions are
+  both *derived* from it, so they can never drift apart.
+- **Persistent storage:** SQLite (local dev) or Postgres (production —
+  SQLAlchemy, same code either way).
+- **Market data:** yfinance (default) or OpenBB, batched into one request per
+  refresh, with automatic fallback to the last known-good price if Yahoo
+  rate-limits the request.
+- **Admin auth:** bcrypt-hashed password + short lockout after repeated
+  failed logins.
+- **Charts:** Plotly (portfolio value, cash-vs-invested, drawdown, allocation,
+  contribution).
+
+---
+
+## What changed vs. the original app
+
+The original app modeled a **fixed €100,000 split across static
+allocations** — "Allocation tab" showed Base Capital / Allocated /
+Unallocated Cash, but there was no actual Buy or Sell action anywhere, and
+the "Changes" tab was permanently empty ("No position updates logged yet").
+It also called Yahoo Finance once per ticker per page load, which is exactly
+what triggered the "Too Many Requests. Rate limited." error visible on the
+live site.
+
+This version:
+
+1. **Replaces the allocation model with a real trade ledger.** Admin → Trade
+   (Buy/Sell) logs an actual transaction; cash balance updates immediately.
+   Admin → Deposit/Withdraw moves cash directly, same as topping up a
+   brokerage account.
+2. **Fixes the rate-limiting failure mode.** All holdings' prices are fetched
+   in a single batched call instead of one call per ticker, and a
+   last-known-good price is cached and used as a fallback (flagged as
+   "stale" in the UI) instead of showing a blank value.
+3. **Makes the Changes tab a real audit trail** — every trade, deposit, and
+   withdrawal, not a feature that was never wired up.
+4. **Adds Postgres support** so Streamlit Community Cloud's ephemeral
+   filesystem doesn't silently erase your trade history on redeploy (see
+   Deployment below — this needs a few minutes of manual setup on your side,
+   I can't create the database account for you).
 
 ---
 
 ## Folder Structure
 
 ```
-portfolio_dashboard/
-├── app.py                    # Streamlit entry point
-├── config.py                 # Env-based configuration
-├── storage.py                # SQLite CRUD + schema + seed data
-├── auth.py                   # Admin authentication (bcrypt)
-├── data_loader.py            # Market data abstraction (yfinance / OpenBB)
-├── portfolio_engine.py       # Portfolio calculations & analytics
-├── charts.py                 # Plotly chart builders
+anchor-investments/
+├── app.py                 # Streamlit entry point
+├── config.py               # Config (Streamlit secrets → env → defaults)
+├── db.py                    # SQLAlchemy persistence layer (SQLite/Postgres)
+├── auth.py                  # Admin authentication (bcrypt + lockout)
+├── data_loader.py           # Market data (batched, cached, fallback-safe)
+├── portfolio_engine.py      # Cash/position ledger math, performance
+├── charts.py                # Plotly chart builders
+├── migrate_legacy.py        # One-off: import the OLD allocation-based DB
 ├── requirements.txt
-├── .env.example              # Copy to .env and fill in
+├── runtime.txt
+├── .env.example
+├── .streamlit/secrets.toml.example
 ├── .gitignore
-├── data/
-│   └── portfolio.db          # SQLite file (auto-created on first run)
-└── .github/
-    └── workflows/
-        └── lint.yml          # GitHub Actions CI
+└── data/                    # local SQLite file lives here (gitignored)
 ```
 
 ---
 
-## Quick Start (macOS Terminal + nano)
-
-### 1. Clone or create the repo
-
-```bash
-# If starting fresh:
-mkdir portfolio_dashboard
-cd portfolio_dashboard
-git init
-```
-
-### 2. Create a virtual environment
+## Quick Start (local)
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-### 3. Install dependencies
-
-```bash
 pip install -r requirements.txt
-```
 
-### 4. Generate your admin password hash
-
-```bash
+# Generate your admin password hash
 python3 -c "import bcrypt; print(bcrypt.hashpw(b'YOUR_PASSWORD', bcrypt.gensalt()).decode())"
-```
 
-Copy the output (the `$2b$12$...` string).
-
-### 5. Create your `.env` file
-
-```bash
 cp .env.example .env
-nano .env
-```
+nano .env   # paste the hash into ADMIN_PASSWORD_HASH, set your details
 
-Fill in at minimum:
-- `ADMIN_USERNAME` — your chosen username
-- `ADMIN_PASSWORD_HASH` — the bcrypt hash from step 4
-- `PORTFOLIO_NAME` — your portfolio name
-- `SUBSTACK_URL` — your Substack link
-
-### 6. Run the app
-
-```bash
 streamlit run app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501) in your browser.
+Open http://localhost:8501. Click **Admin Login** top-right, then use the
+**Admin** tab to log your first Deposit and Buy trades.
+
+### Bringing over your existing holdings
+
+Your current live site's data (9 holdings, €85,000 allocated) can be
+converted into opening Buy transactions instead of starting from zero. I
+copied the SQLite file out of your GitHub repo — it ships in this package at
+`legacy_data/legacy_portfolio.db`. Run:
+
+```bash
+python migrate_legacy.py legacy_data/legacy_portfolio.db
+```
+
+This creates one BUY transaction per active holding (skipping the CASH row,
+which just folds into the starting cash balance) at its recorded entry
+price, or — for the one holding that had no recorded entry price (AMZN) —
+the historical closing price on its effective date, fetched live. Review the
+Changes tab afterwards to confirm it landed correctly.
 
 ---
 
 ## Admin Workflow
 
-1. Open the app and click **Admin Login** in the top-right.
-2. Enter your username and password from `.env`.
-3. The **⚙️ Admin** tab appears.
-4. Add, edit, or deactivate holdings — every save writes **immediately to SQLite**.
-5. Holdings persist across browser refreshes, app restarts, and redeployments.
-
-### Adding a holding (example)
-
-| Field | Example |
-|---|---|
-| Ticker | `IWDA.AS` |
-| Name | `iShares Core MSCI World ETF` |
-| EUR Allocation | `35000` |
-| Asset Class | `ETF` |
-| Currency | `USD` |
-| Region | `Global` |
-| Effective Date | `2024-01-15` |
+1. **Admin Login** (top-right) with your username/password.
+2. **Trade (Buy/Sell):** enter a ticker, click "Fetch live price" to
+   auto-fill the current price (override it if you want to book at a
+   different price), enter quantity, submit. A Buy is blocked if it would
+   overdraw cash; a Sell is blocked if you don't hold enough units.
+3. **Deposit / Withdraw:** add or remove cash directly — e.g. to model
+   topping up the portfolio, or to correct the opening balance.
+4. **Ledger & Corrections:** every transaction ever logged, including voided
+   ones. Mistakes are corrected by **voiding** a transaction (soft delete)
+   rather than deleting it outright, so the audit trail in the public
+   Changes tab never silently loses a row.
 
 ---
 
 ## Persistent Storage Design
 
-### Why SQLite?
+`transactions` is the single source of truth. Cash balance and open
+positions are computed from it on every page load — see
+`portfolio_engine.py`:
 
-SQLite is a single-file database — perfect for:
-- Local development and self-hosted deployment
-- Git-friendly (the `.db` file can be committed for dev seeds or excluded for prod)
-- Zero configuration — no server needed
-- Easy migration to PostgreSQL later (see below)
+```
+cash_balance = starting_cash + Σ cash_amount_eur over all non-voided rows
 
-### Schema
-
-```sql
--- holdings: source of truth for current positions
-CREATE TABLE holdings (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker          TEXT NOT NULL UNIQUE,
-    name            TEXT NOT NULL,
-    eur_allocation  REAL NOT NULL DEFAULT 0,
-    asset_class     TEXT DEFAULT 'Equity',
-    currency        TEXT DEFAULT 'EUR',
-    region          TEXT DEFAULT 'Global',
-    effective_date  TEXT NOT NULL,
-    active          INTEGER NOT NULL DEFAULT 1,
-    notes           TEXT DEFAULT '',
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
-);
-
--- rebalance_events: snapshot headers
-CREATE TABLE rebalance_events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_date  TEXT NOT NULL,
-    description TEXT DEFAULT '',
-    created_at  TEXT NOT NULL
-);
-
--- rebalance_items: holdings at each snapshot
-CREATE TABLE rebalance_items (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id       INTEGER NOT NULL REFERENCES rebalance_events(id),
-    ticker         TEXT NOT NULL,
-    name           TEXT NOT NULL,
-    eur_allocation REAL NOT NULL,
-    asset_class    TEXT,
-    currency       TEXT,
-    region         TEXT
-);
-
--- portfolio_meta: key/value store (last_updated, inception_date, …)
-CREATE TABLE portfolio_meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
+BUY  qty @ price   → cash_amount_eur = -(qty * price_eur + fees)
+SELL qty @ price   → cash_amount_eur = +(qty * price_eur - fees)
+DEPOSIT / WITHDRAWAL → cash_amount_eur = ± amount
 ```
 
-### Migration to PostgreSQL
+Positions use **average-cost accounting**: each Buy blends into the
+position's running average cost; each Sell realizes P&L against that
+average and reduces the cost basis proportionally.
 
-Replace the `_connect()` function in `storage.py` with a `psycopg2` or
-`SQLAlchemy` connection. All public functions (`get_holdings`, `save_holding`,
-etc.) remain unchanged — only the driver changes.
+### Why SQLite locally but Postgres in production?
+
+Streamlit Community Cloud's filesystem is **ephemeral** — it resets on every
+redeploy or restart. A SQLite file committed to Git only gives you a fixed
+seed state, not a database that survives you logging trades through the
+Admin tab. Local development doesn't have that problem, so SQLite (zero
+setup, single file) is the default there; production needs a database that
+lives outside the container.
+
+### Setting up free Postgres (Supabase) — you do this part
+
+I can't create an account on your behalf, but it's about five minutes:
+
+1. Go to [supabase.com](https://supabase.com) → **New project** (free tier).
+2. Once it's provisioned, go to **Project Settings → Database → Connection
+   string**, and copy the URI (it looks like
+   `postgresql://postgres:[YOUR-PASSWORD]@db.xxxx.supabase.co:5432/postgres`).
+3. Change the scheme from `postgresql://` to `postgresql+psycopg2://` and use
+   that as `DATABASE_URL`.
+4. Locally: put it in `.env`. On Streamlit Community Cloud: paste it into
+   **App settings → Secrets** (see `.streamlit/secrets.toml.example`).
+5. Run the app once — `db.init_db()` creates the tables automatically on
+   first connection. Then run `migrate_legacy.py` against the same
+   `DATABASE_URL` (or just re-log your trades from the Admin tab) to
+   populate it.
+
+Free tier covers this comfortably — a portfolio's trade ledger is a handful
+of KB even after years of trading; Supabase's free plan gives 500MB.
 
 ---
 
-## SQLite and Git
+## Deployment (Streamlit Community Cloud)
 
-| Scenario | Commit `data/portfolio.db`? |
-|---|---|
-| Local dev / fresh machine | ✅ Yes — brings seed data |
-| Streamlit Community Cloud | ❌ No — use persistent volume or external DB |
-| Self-hosted (VPS/Docker) | ❌ No — keep on server volume, back up separately |
-
-For Streamlit Community Cloud, the filesystem resets on each deploy.
-Options:
-1. Use an external database (PlanetScale, Supabase, Railway PostgreSQL).
-2. Store a base JSON/CSV snapshot in the repo and sync to a cloud DB on startup.
-3. Self-host on a VPS where the filesystem persists.
-
----
-
-## GitHub Workflow
-
-### Initial push
-
-```bash
-cd portfolio_dashboard
-git init
-git add .
-git commit -m "feat: initial portfolio dashboard"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/portfolio-dashboard.git
-git push -u origin main
-```
-
-### Daily workflow
-
-```bash
-# Edit code in nano
-nano app.py
-
-# Stage, commit, push
-git add .
-git commit -m "feat: add ASML position"
-git push
-```
-
-### After changing holdings via Admin UI
-
-The SQLite `.db` file updates automatically. If you want to track it:
-```bash
-git add data/portfolio.db
-git commit -m "data: rebalance Q2 2025"
-git push
-```
+1. Push this project to GitHub (replacing or alongside the current repo —
+   your call).
+2. [share.streamlit.io](https://share.streamlit.io) → New app → select the
+   repo, branch, and `app.py`.
+3. **Advanced settings → Secrets** — paste the contents of
+   `.streamlit/secrets.toml.example` with your real values, **including
+   `DATABASE_URL` pointed at Postgres** (skipping this means your trade
+   history disappears on the next redeploy).
+4. Deploy. First load creates the tables; log in as Admin and either replay
+   `migrate_legacy.py` against the Postgres URL or re-enter your trades.
 
 ---
 
-## Deployment
+## Known limitation (flagged, not hidden)
 
-### Streamlit Community Cloud (recommended for public Substack companion)
-
-1. Push your repo to GitHub (public or private).
-2. Go to [share.streamlit.io](https://share.streamlit.io) → New app.
-3. Select your repo, branch `main`, and main file `app.py`.
-4. In **Advanced settings → Secrets**, add all keys from `.env.example`.
-5. ⚠️ Community Cloud has **ephemeral storage** — the SQLite file resets on redeploy.
-   Solution: commit a seed `data/portfolio.db` for demo data, or switch to an
-   external PostgreSQL (e.g. Supabase free tier).
-
-### Self-hosted on a VPS (persistent storage ✅)
-
-```bash
-# On your server
-git clone https://github.com/YOUR_USERNAME/portfolio-dashboard.git
-cd portfolio-dashboard
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env && nano .env
-
-# Run with nohup or as a systemd service
-nohup streamlit run app.py --server.port 8501 --server.headless true &
-
-# Update after git push:
-git pull && streamlit run app.py
-```
-
----
-
-## Environment Variables Reference
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `ADMIN_USERNAME` | ✅ | `admin` | Admin login username |
-| `ADMIN_PASSWORD_HASH` | ✅ | — | bcrypt hash of admin password |
-| `PORTFOLIO_NAME` | — | `Model Portfolio` | Displayed in header |
-| `PORTFOLIO_DESCRIPTION` | — | Built-in text | Displayed in About tab |
-| `SUBSTACK_URL` | — | — | Link to your Substack |
-| `BASE_CAPITAL` | — | `100000` | Fixed model portfolio size (EUR) |
-| `DB_PATH` | — | `data/portfolio.db` | SQLite file path |
-| `DATA_PROVIDER` | — | `yfinance` | `yfinance` or `openbb` |
-| `PRICE_CACHE_TTL` | — | `900` | Price cache duration (seconds) |
-
----
-
-## Notes on OpenBB
-
-To use OpenBB as the data provider:
-```bash
-pip install openbb
-```
-Then set `DATA_PROVIDER=openbb` in `.env`.
-
-OpenBB is used as the first-attempt provider; the app falls back to yfinance
-automatically if OpenBB fails. This makes the data layer resilient and easy to
-extend with other providers later.
+Performance/Sharpe/volatility/drawdown are computed on **total portfolio
+value**, not a time-weighted return. A Deposit or Withdrawal shows up as a
+jump in portfolio value rather than being excluded from the return
+calculation. For a portfolio that rarely moves cash in or out after
+inception, this is what the original app did too (return vs. a fixed base
+capital) and is easy to reason about. If deposits/withdrawals become
+frequent, this should be upgraded to a proper time-weighted return
+calculation.
 
 ---
 
