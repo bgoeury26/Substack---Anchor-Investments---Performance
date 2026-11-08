@@ -35,8 +35,8 @@ def login_form() -> None:
         st.error(f"Too many failed attempts. Try again in {remaining}s.")
         return
 
-    st.markdown("### 🔐 Admin Login")
-    with st.form("login_form", clear_on_submit=True):
+    st.markdown("**Admin login**")
+    with st.form("login_form", clear_on_submit=True, border=False):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Log in")

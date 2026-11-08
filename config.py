@@ -76,6 +76,6 @@ HISTORY_CACHE_TTL = int(_get("HISTORY_CACHE_TTL", "3600"))  # 1 hr
 # ── Display ───────────────────────────────────────────────────────────────────
 CURRENCY_DISPLAY = "EUR"
 DISCLAIMER = (
-    "⚠️  Model portfolio for informational and educational purposes only. "
+    "Model portfolio for informational and educational purposes only. "
     "This is not investment advice. Past performance is not indicative of future results."
 )

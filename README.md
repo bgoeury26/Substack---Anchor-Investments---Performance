@@ -60,10 +60,13 @@ anchor-investments/
 ├── data_loader.py           # Market data (batched, cached, fallback-safe)
 ├── portfolio_engine.py      # Cash/position ledger math, performance
 ├── charts.py                # Plotly chart builders
+├── theme.py                 # Visual identity: CSS, artwork, HTML components
+├── assets/                  # Logo, favicon, hero photograph
 ├── migrate_legacy.py        # One-off: import the OLD allocation-based DB
 ├── requirements.txt
 ├── runtime.txt
 ├── .env.example
+├── .streamlit/config.toml    # Streamlit colour theme
 ├── .streamlit/secrets.toml.example
 ├── .gitignore
 └── data/                    # local SQLite file lives here (gitignored)
